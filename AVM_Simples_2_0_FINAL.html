@@ -63,7 +63,7 @@ function extractRecorteEntries(i){
 async function ingest(items){
  const inbox=imported();let added=0,duplicates=0;const expanded=items.flatMap(extractRecorteEntries);
  for(const item of expanded){item.fp=fingerprint(item);if(inbox.some(x=>x.fp===item.fp)){duplicates++;continue}item.id=uuid();item.caseId=suggestedCase(item);item.reviewed=false;inbox.push(item);added++}
- try{await persist();renderInbox();$('importResult').textContent=added+' comunicação(ões) importada(s); '+duplicates+' duplicada(s) idêntica(s) ignorada(s).'}catch(e){inbox.splice(inbox.length-added,added);$('importResult').textContent='Falha ao salvar. Verifique o espaço livre e o backup.';throw e}
+ try{await persist();renderInbox();$('importResult').textContent=added+' comunicação(ões) importada(s); '+duplicates+' duplicada(s) idêntica(s) ignorada(s).';return {added,duplicates}}catch(e){inbox.splice(inbox.length-added,added);$('importResult').textContent='Falha ao salvar. Verifique o espaço livre e o backup.';throw e}
 }
 function renderUnregistered(){
  const tb=$('unregisteredRows');if(!tb)return;
@@ -199,19 +199,53 @@ function loadGoogleIdentity(){return new Promise((resolve,reject)=>{if(window.go
 function gmailReset(){++gmailSession;gmailAccount='';gmailToken='';gmailTokenExpiry=0;if(gmailTimer){clearInterval(gmailTimer);gmailTimer=null}gmailButtons(false);gmailStatus('Desconectado — nenhuma consulta automática ativa.');}
 function safeDecodeGmail(data){try{const normalized=data.replace(/-/g,'+').replace(/_/g,'/');const raw=atob(normalized.padEnd(Math.ceil(normalized.length/4)*4,'='));return new TextDecoder().decode(Uint8Array.from(raw,c=>c.charCodeAt(0)))}catch{return ''}}
 function bodyFromPayload(payload){const plain=[],html=[];function visit(p){if(!p)return;if(p.body?.data){const text=safeDecodeGmail(p.body.data);if(p.mimeType==='text/plain')plain.push(text);else if(p.mimeType==='text/html')html.push(text)}for(const part of p.parts||[])visit(part)}visit(payload);if(plain.length)return plain.join('\n');return html.map(text=>{const doc=new DOMParser().parseFromString(text,'text/html');doc.querySelectorAll('script,style,iframe').forEach(n=>n.remove());return doc.body?.textContent||''}).join('\n')}
-async function googleGet(endpoint,expected=gmailSession){const access=gmailToken;const res=await fetch('https://gmail.googleapis.com/gmail/v1/users/me/'+endpoint,{headers:{Authorization:'Bearer '+access},cache:'no-store'});if(expected!==gmailSession)throw Error('Conexão encerrada ou conta alterada.');if(res.status===401){gmailReset();throw Error('Autorização expirou. Conecte o Gmail novamente.')}if(!res.ok){let detail='';try{detail=(await res.json()).error?.message||''}catch{}throw Error('Erro do Gmail ('+res.status+'): '+detail)}const value=await res.json();if(expected!==gmailSession)throw Error('Conexão encerrada ou conta alterada.');return value}
-async function fetchGmailJudicial(){if(gmailInProgress)return;if(Date.now()<gmailQuotaUntil){gmailStatus('Limite temporário da API Gmail. Nova tentativa manual permitida após '+new Date(gmailQuotaUntil).toLocaleTimeString('pt-BR')+'. Nenhum dado do cofre foi alterado.');return}if(!gmailToken){gmailStatus('Conecte o Gmail primeiro.');return}if(Date.now()>gmailTokenExpiry-10000){gmailReset();gmailStatus('Sessão do Google expirada; clique em Conectar Gmail novamente.');return}const active=gmailSession;gmailInProgress=true;$('gmailFetch').disabled=true;gmailStatus('Consultando mensagens judiciais no Gmail…');
-try{
+async function googleGet(endpoint,expected=gmailSession){const access=gmailToken;const res=await fetch('https://gmail.googleapis.com/gmail/v1/users/me/'+endpoint,{headers:{Authorization:'Bearer '+access},cache:'no-store'});if(expected!==gmailSession)throw Error('Conexão encerrada ou conta alterada.');if(res.status===401){gmailReset();const expired=Error('Autorização expirou. Conecte o Gmail novamente.');expired.gmailExpired=true;throw expired}if(!res.ok){let detail='';try{detail=(await res.json()).error?.message||''}catch{}throw Error('Erro do Gmail ('+res.status+'): '+detail)}const value=await res.json();if(expected!==gmailSession)throw Error('Conexão encerrada ou conta alterada.');return value}
+async function fetchGmailJudicial(){
+ if(gmailInProgress)return;
+ if(Date.now()<gmailQuotaUntil){gmailStatus('Limite temporário da API Gmail. Aguarde até '+new Date(gmailQuotaUntil).toLocaleTimeString('pt-BR')+' para tentar novamente. Os registros já gravados foram preservados.');return}
+ if(!gmailToken){gmailStatus('Conecte o Gmail primeiro.');return}
+ if(Date.now()>gmailTokenExpiry-10000){gmailReset();gmailStatus('Sessão do Google expirada; clique em Conectar Gmail novamente.');return}
+ const active=gmailSession;gmailInProgress=true;$('gmailFetch').disabled=true;
+ let pages=0,examined=0,known=0,added=0,duplicates=0,pending=[],storageFailed=false;
+ const seenMessages=new Set(),seenPages=new Set();
+ const summary=()=>pages+' página(s), '+examined+' e-mail(s) examinado(s), '+known+' já importado(s), '+added+' comunicação(ões) nova(s) gravada(s) e '+duplicates+' duplicada(s) ignorada(s)';
+ const flush=async()=>{if(!pending.length)return;if(active!==gmailSession||!password)throw Error('Conexão encerrada; os lotes anteriores permanecem gravados.');try{const result=await ingest(pending);added+=result.added;duplicates+=result.duplicates;pending=[]}catch(err){storageFailed=true;throw err}};
+ gmailStatus('Consultando todas as páginas do filtro dos últimos 30 dias…');
+ try{
  const get=endpoint=>googleGet(endpoint,active);const profile=await get('profile');if(!profile.emailAddress)throw Error('Não foi possível identificar a conta.');gmailAccount=profile.emailAddress.trim().toLowerCase();
  const query='newer_than:30d -in:spam -in:trash {"Recorte Digital" "Atualizações de Informações Processuais" "acompanhamento e atualizações" "[PUSH]" "Portal e-Saj" "Movimentações Processuais" "intimação" "publicação" "DJEN" "TRF3" "TRT02" "TRT-2" "TRF-3" "TJSP" "PJe" "eproc"}';
- const params=new URLSearchParams({q:query,maxResults:'30'});const listing=await get('messages?'+params.toString());const results=listing.messages||[];const hasMore=!!listing.nextPageToken;
- const relevant=[];for(const m of results){await new Promise(resolve=>setTimeout(resolve,250));const mail=await get('messages/'+encodeURIComponent(m.id)+'?format=full');const h=mail.payload?.headers||[];const field=n=>h.find(x=>x.name.toLowerCase()===n)?.value||'';const subject=field('subject'),body=bodyFromPayload(mail.payload).slice(0,50000);
- // All returned Gmail candidates enter the triage list; no second-stage discard.
- const text=subject+' '+body;
- relevant.push({account:gmailAccount,gmailId:m.id,source:'Gmail (API oficial)',subject,from:field('from'),messageId:'gmail:'+gmailAccount+':'+m.id,date:new Date(Number(mail.internalDate||Date.now())).toISOString().slice(0,10),body});
+ let pageToken='';
+ do{
+ if(active!==gmailSession||!password)return;
+ if(seenPages.has(pageToken))throw Error('O Gmail repetiu uma página. Consulta interrompida para evitar repetição.');seenPages.add(pageToken);
+ const params=new URLSearchParams({q:query,maxResults:'30'});if(pageToken)params.set('pageToken',pageToken);
+ gmailStatus('Conta '+gmailAccount+' · Consultando página '+(pages+1)+'… '+summary()+'.');
+ const listing=await get('messages?'+params.toString());pages++;
+ for(const m of listing.messages||[]){
+ if(active!==gmailSession||!password)return;
+ if(seenMessages.has(m.id))continue;seenMessages.add(m.id);
+ if(imported().some(i=>i.gmailId===m.id&&String(i.account||'').toLowerCase()===gmailAccount)){examined++;known++;continue}
+ await new Promise(resolve=>setTimeout(resolve,250));
+ if(active!==gmailSession||!password)return;
+ const mail=await get('messages/'+encodeURIComponent(m.id)+'?format=full'),headers=mail.payload?.headers||[];
+ const field=n=>headers.find(x=>x.name.toLowerCase()===n)?.value||'';
+ pending.push({account:gmailAccount,gmailId:m.id,source:'Gmail (API oficial)',subject:field('subject'),from:field('from'),messageId:'gmail:'+gmailAccount+':'+m.id,date:new Date(Number(mail.internalDate||Date.now())).toISOString().slice(0,10),body:bodyFromPayload(mail.payload).slice(0,50000)});examined++;
+ if(pending.length>=10)await flush();
+ gmailStatus('Conta '+gmailAccount+' · Recebendo página '+pages+'… '+summary()+'.');
  }
- if(active!==gmailSession||!password)return;if(relevant.length){await ingest(relevant)}gmailStatus('Conta '+gmailAccount+'. Consulta concluída: '+results.length+' e-mail(s) candidato(s) e '+relevant.length+' encaminhado(s) para triagem. Lote máximo de 30 mensagens dos últimos 30 dias.'+(hasMore?' Há mais mensagens não consultadas; esta busca NÃO é exaustiva.':'')+' Confira diretamente o Gmail e os portais oficiais para não perder prazos. Duplicadas já importadas são sinalizadas.');
-}catch(e){if(active===gmailSession){if(/\b(403|429)\b|quota exceeded|rate limit/i.test(e.message)){gmailQuotaUntil=Date.now()+120000;gmailStatus('Limite temporário do Gmail detectado. Consultas suspensas por 2 minutos. Não repita a consulta. Detalhe: '+e.message)}else gmailStatus('Não foi possível consultar: '+e.message)}}finally{gmailInProgress=false;$('gmailFetch').disabled=!gmailToken}}
+ await flush();pageToken=listing.nextPageToken||'';
+ }while(pageToken);
+ if(active!==gmailSession||!password)return;
+ gmailStatus('Conta '+gmailAccount+'. Consulta concluída: '+summary()+'. Todas as páginas retornadas pelo Gmail para este filtro dos últimos 30 dias foram percorridas. O filtro pode deixar avisos de fora; confira também o Gmail e as fontes oficiais.');
+ }catch(err){
+ if(active===gmailSession&&password){
+ let saveWarning='';if(pending.length&&!storageFailed){try{await flush()}catch(saveError){saveWarning=' Não foi possível gravar o último lote.'}}
+ const unsaved=pending.length?' '+pending.length+' e-mail(s) lido(s) ainda não gravado(s); serão buscados novamente.':'';
+ const quota=/\b(403|429)\b|quota exceeded|rate limit/i.test(err.message);if(quota)gmailQuotaUntil=Date.now()+120000;
+ gmailStatus('Consulta incompleta: '+summary()+'. Os registros já gravados foram preservados.'+unsaved+saveWarning+' '+(quota?'Limite temporário do Gmail; aguarde 2 minutos e use Consultar agora.':'Use Consultar agora para tentar novamente; os já importados serão ignorados.')+' Detalhe: '+err.message);
+ }else if(err.gmailExpired&&password&&!gmailToken){gmailStatus('Consulta incompleta: '+summary()+'. Os registros já gravados foram preservados. A autorização expirou; conecte o Gmail novamente para buscar o restante.');}
+ }finally{gmailInProgress=false;$('gmailFetch').disabled=!gmailToken}
+}
 $('gmailConnect').addEventListener('click',async()=>{
  const clientId=$('gmailClientId').value.trim();if(!/^\d+-[a-z0-9-]+\.apps\.googleusercontent\.com$/i.test(clientId)){gmailStatus('Informe um ID de cliente OAuth válido criado no Google Cloud (tipo Aplicativo Web).');return}
  if(location.protocol!=='https:' && location.hostname!=='localhost'){gmailStatus('A autenticação OAuth do Google exige uma origem HTTPS autorizada. O arquivo file:// da pasta Downloads não pode conectar diretamente.');return}
