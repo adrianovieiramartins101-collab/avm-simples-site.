@@ -1,33 +1,823 @@
 <!DOCTYPE html>
-<html lang="pt-BR"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><meta name="referrer" content="no-referrer"><title>AVM Simples | Consulta de Publicações</title>
-<style>:root{color-scheme:light}*{box-sizing:border-box}body{margin:0;background:#f1f5f9;color:#122b49;font:16px system-ui,-apple-system,Segoe UI,Arial}header{background:#112c4d;color:white;padding:22px max(20px,calc((100% - 960px)/2));border-bottom:4px solid #b58b36}header h1{margin:0;font-size:25px}header p{margin:5px 0;color:#eed9a9}main{max-width:960px;margin:24px auto;padding:0 16px}.panel{background:white;border:1px solid #dbe3ed;border-radius:14px;padding:22px;margin:15px 0;box-shadow:0 2px 6px #14294108}button{border:0;background:#183d66;color:white;border-radius:9px;padding:12px 17px;font-size:15px;cursor:pointer;margin:3px 5px 3px 0}button.secondary{background:#e8edf4;color:#102d4d}button:disabled{opacity:.5;cursor:not-allowed}a{color:#174b86}.muted{color:#617189;font-size:14px}.warning{border-left:4px solid #bc9134;background:#fff4db;padding:12px 14px;border-radius:6px;font-size:14px}#notice{font-size:14px;margin:12px 0;white-space:pre-wrap}.error{color:#9b2424}.success{color:#166339}.item{border-top:1px solid #e1e6ef;padding:15px 0}.item h3{font-size:16px;margin:0 0 6px;overflow-wrap:anywhere}.item p{font-size:14px;line-height:1.5;margin:6px 0}.tag{font-size:12px;border-radius:6px;padding:3px 7px;background:#e7edf4;display:inline-block;margin-right:6px}input{width:100%;padding:10px;border:1px solid #aab8c9;border-radius:7px;font:inherit}#list{min-height:30px}.row{display:flex;gap:8px;flex-wrap:wrap;align-items:center}.hide{display:none}small{color:#52657c}</style>
-<script src="https://accounts.google.com/gsi/client" async defer></script></head>
-<body><header><h1>AVM <span style="color:#d3a64a">Simples</span> | Publicações</h1><p>Consulta ao Gmail — ambiente de teste, somente leitura</p></header><main>
-<section class="panel"><div class="warning"><strong>Proteção dos dados:</strong> este site é público, mas não contém mensagens, clientes, senhas ou backups. As mensagens serão consultadas diretamente no Gmail após sua autorização e exibidas somente nesta sessão. Não use este painel como controle oficial de prazos.</div>
-<p class="muted">A conexão exige que você esteja no endereço HTTPS do GitHub Pages e use a conta Google cadastrada como usuária de teste. Não funciona abrindo este arquivo diretamente no computador.</p>
-<div class="row"><button id="connect">Conectar Gmail</button><button id="refresh" disabled>Consultar publicações</button><button class="secondary" id="disconnect" disabled>Desconectar</button></div><div id="notice" role="status">Gmail ainda não conectado.</div></section>
-<section class="panel"><h2 style="margin-top:0">Publicações e movimentações recebidas por e-mail</h2><p class="muted">Busca dos últimos 30 dias: Recorte Digital da OAB/SP, e-SAJ, eproc e avisos PUSH do TRT e TRF. Avisos PUSH não são necessariamente intimações. Abra os atos oficiais no tribunal para conferir prazos.</p><label for="filter">Filtrar resultados encontrados</label><input id="filter" type="search" placeholder="Digite número do processo ou palavra do assunto" disabled><div id="count" class="muted" style="margin-top:12px"></div><div id="list"></div></section>
-<p class="muted">AVM Simples — Teste de integração Gmail. Não salva mensagens nem tokens no armazenamento local. Salva apenas identificadores e marcações de conferência, separados por conta, neste navegador. As marcações permanecem ao reabrir o navegador; limpar os dados do site as apaga. Conferir uma mensagem não valida prazo jurídico. Para uso contínuo, é necessário revisar segurança, permissão do Google e funcionamento das consultas.</p>
-</main><script>
-(()=>{'use strict';
-const CLIENT_ID='293661527325-hunajp2u9gbnt8gtfvedij5jn924cl2u.apps.googleusercontent.com';
-const SCOPE='https://www.googleapis.com/auth/gmail.readonly';
-const QUERY='newer_than:30d {"Recorte Digital OAB/SP" "Portal e-Saj" "Movimentações Processuais" "[PUSH]" "[Push]" "EPROC Cível"}';
-let tokenClient=null, token='',expiresAt=0, records=[], accountKey='', session=0;
-const $=id=>document.getElementById(id);
-function message(s,cls=''){const el=$('notice');el.textContent=s;el.className=cls;}
-function controls(connected){$('refresh').disabled=!connected;$('disconnect').disabled=!connected;$('filter').disabled=!connected;}
-function clear(){records=[];$('list').replaceChildren();$('count').textContent='';$('filter').value='';}
-function reviewKey(id){return accountKey+':'+encodeURIComponent(id)}
-function reviewed(id){try{return !!accountKey&&localStorage.getItem(reviewKey(id))==='1'}catch{return false}}
-function reviewButton(id){let b=document.createElement('button');b.className='secondary';b.disabled=!accountKey;function update(){let done=reviewed(id);b.textContent=done?'Conferida — desfazer':'Marcar como conferida';b.setAttribute('aria-pressed',String(done))}update();b.addEventListener('click',()=>{try{if(reviewed(id))localStorage.removeItem(reviewKey(id));else localStorage.setItem(reviewKey(id),'1');update();message('Marcação salva neste navegador.','success')}catch{message('Não foi possível salvar a marcação. Verifique se o navegador permite armazenamento local.','error')}});return b}
-function badge(subject){if(/recorte digital/i.test(subject))return 'RECORTE OAB/SP';if(/e-saj|eproc/i.test(subject))return 'ANDAMENTO INFORMATIVO';return 'AVISO PUSH / MOVIMENTAÇÃO';}
-function render(){let f=$('filter').value.toLocaleLowerCase('pt-BR');let a=records.filter(r=>(r.subject+' '+r.snippet+' '+r.from).toLocaleLowerCase('pt-BR').includes(f));$('count').textContent=a.length+' mensagem(ns) apresentada(s).';let frag=document.createDocumentFragment();for(let r of a){let div=document.createElement('article');div.className='item';let h=document.createElement('h3');h.textContent=r.subject||'Mensagem sem assunto';let lab=document.createElement('span');lab.className='tag';lab.textContent=badge(r.subject);let sm=document.createElement('small');sm.textContent=' '+r.date;let p=document.createElement('p');p.textContent=r.snippet||'Sem prévia disponível';let l=document.createElement('a');l.href='https://mail.google.com/mail/u/0/#all/'+encodeURIComponent(r.id);l.target='_blank';l.rel='noopener noreferrer';l.textContent='Abrir e conferir no Gmail';let actions=document.createElement('div');actions.className='row';actions.append(l,reviewButton(r.id));div.append(lab,sm,h,p,actions);frag.appendChild(div)}$('list').replaceChildren(frag)}
-async function api(url){let r=await fetch(url,{headers:{Authorization:'Bearer '+token},cache:'no-store'});let j=await r.json();if(!r.ok){if(r.status===401){token='';controls(false)}throw Error(j?.error?.message||'Erro HTTP '+r.status)}return j}
-function shortHeaders(m){let hs=m.payload?.headers||[];let get=n=>hs.find(h=>h.name.toLowerCase()===n)?.value||'';return{id:m.id,subject:get('subject'),from:get('from'),date:get('date')||'',snippet:m.snippet||''}}
-async function load(){if(!token||Date.now()>expiresAt){message('Sua autorização expirou. Clique novamente em Conectar Gmail.','error');controls(false);return}const current=++session;accountKey='';message('Consultando mensagens recentes do Gmail...');$('refresh').disabled=true;clear();try{let profile=await api('https://gmail.googleapis.com/gmail/v1/users/me/profile');if(current!==session)return;if(!profile.emailAddress)throw Error('Não foi possível identificar a conta Gmail.');let digest=await crypto.subtle.digest('SHA-256',new TextEncoder().encode(profile.emailAddress.trim().toLowerCase()));if(current!==session)return;accountKey='avm:review:v1:'+Array.from(new Uint8Array(digest),b=>b.toString(16).padStart(2,'0')).join('');let data=await api('https://gmail.googleapis.com/gmail/v1/users/me/messages?maxResults=60&q='+encodeURIComponent(QUERY));let ids=data.messages||[];let results=[];for(let i=0;i<ids.length;i+=8){let part=await Promise.allSettled(ids.slice(i,i+8).map(m=>api('https://gmail.googleapis.com/gmail/v1/users/me/messages/'+encodeURIComponent(m.id)+'?format=metadata&metadataHeaders=Subject&metadataHeaders=From&metadataHeaders=Date')));for(let p of part)if(p.status==='fulfilled')results.push(shortHeaders(p.value))}if(current!==session)return;records=results;render();message('Consulta concluída. '+records.length+' mensagens localizadas. Confira os atos nos tribunais.','success')}catch(e){if(current!==session)return;message('Não foi possível consultar: '+e.message,'error')}finally{if(current===session)$('refresh').disabled=!token}}
-$('connect').addEventListener('click',()=>{if(!location.protocol.startsWith('https')){message('Abra o site no HTTPS do GitHub Pages para conectar o Gmail.','error');return}if(!window.google?.accounts?.oauth2){message('A biblioteca de login do Google ainda não carregou. Confira a conexão à internet e atualize a página.','error');return}try{if(!tokenClient)tokenClient=google.accounts.oauth2.initTokenClient({client_id:CLIENT_ID,scope:SCOPE,callback:response=>{if(response.error||!response.access_token){message('Autorização não concluída: '+(response.error||'sem token'),'error');return}if(!google.accounts.oauth2.hasGrantedAllScopes(response,SCOPE)){message('A permissão de leitura do Gmail não foi concedida.','error');return}token=response.access_token;expiresAt=Date.now()+Math.max(60,Number(response.expires_in||3000)-90)*1000;controls(true);message('Gmail autorizado somente para leitura.');load()},error_callback:e=>message('Janela de autorização não concluída: '+(e?.type||'erro'),'error')});tokenClient.requestAccessToken({prompt:'consent'})}catch(e){message('Falha ao iniciar conexão: '+e.message,'error')}});
-$('refresh').addEventListener('click',load);$('filter').addEventListener('input',render);
-$('disconnect').addEventListener('click',()=>{let prior=token;++session;accountKey='';token='';expiresAt=0;controls(false);clear();if(prior&&window.google?.accounts?.oauth2)google.accounts.oauth2.revoke(prior,()=>{});message('Desconectado. Nenhuma mensagem foi armazenada aqui. As marcações de conferência continuam salvas neste navegador.');});
+
+<html lang="pt-BR"><head><meta charset="utf-8"/><meta content="width=device-width,initial-scale=1" name="viewport"/><title>AVM Simples 2.2 — Gestão Jurídica e Intimações</title><style>:root{font-family:system-ui,-apple-system,Segoe UI,sans-serif;color:#17233a;background:#f2f5f9}*{box-sizing:border-box}body{margin:0}header{background:#112c4d;color:white;padding:18px 24px;display:flex;align-items:center;justify-content:space-between;gap:12px;flex-wrap:wrap}header b{font-size:22px;letter-spacing:.3px}header small{color:#d9ba74}.layout{display:grid;grid-template-columns:210px 1fr;min-height:calc(100vh - 73px)}nav{background:#17385b;padding:18px 10px;display:flex;flex-direction:column;gap:8px}nav button{background:transparent;color:white;text-align:left;border:0;border-radius:8px;padding:13px;cursor:pointer;font-size:15px}nav button.active,nav button:hover{background:#315a7f}main{padding:24px;max-width:1100px;width:100%;margin:auto}h1{font-size:25px;margin:0 0 12px}h2{font-size:19px}.panel{background:white;border:1px solid #dce4ee;border-radius:12px;padding:20px;margin:14px 0;box-shadow:0 2px 7px #152e4a0a}.muted{color:#596c80}.notice{background:#fff6de;border-left:4px solid #c79d3b;padding:12px;border-radius:5px;font-size:14px}.grid{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:14px}.field{display:flex;flex-direction:column;gap:5px;margin-bottom:12px}label{font-weight:600;font-size:14px}input,select,textarea{border:1px solid #bcc9d7;border-radius:7px;padding:11px;font:inherit;width:100%;background:white}button{font:inherit;cursor:pointer}.btn{border:0;background:#173e65;color:white;border-radius:8px;padding:11px 15px;margin:3px 4px 3px 0}.btn.secondary{background:#edf1f6;color:#18395c;border:1px solid #cdd7e1}.btn.danger{background:#a12f36}.btn.gold{background:#a77921}.btn:disabled{opacity:.5;cursor:not-allowed}.toolbar{display:flex;flex-wrap:wrap;align-items:center;gap:8px;margin:14px 0}.toolbar input{max-width:330px}table{width:100%;border-collapse:collapse}td,th{padding:12px 8px;border-bottom:1px solid #e3e9f0;text-align:left;vertical-align:top}th{color:#445970;font-size:13px}td{overflow-wrap:anywhere}.scroll{overflow-x:auto}.pill{font-size:12px;background:#e9f1f7;border-radius:20px;padding:4px 8px;display:inline-block}.hidden{display:none!important}.login{max-width:500px;margin:55px auto}.stat{font-size:30px;color:#163d65;font-weight:750}.error{color:#a12f36;font-size:14px}.success{color:#16734e;font-size:14px}footer{color:#5c6e80;font-size:12px;margin-top:30px}#toast{position:fixed;bottom:18px;right:18px;background:#183a5a;color:white;padding:13px 18px;border-radius:9px;display:none;max-width:330px;z-index:3}@media(max-width:700px){.layout{grid-template-columns:1fr}nav{flex-direction:row;overflow:auto;padding:9px}nav button{white-space:nowrap;padding:10px}main{padding:14px}.grid{grid-template-columns:1fr}header b{font-size:19px}td,th{font-size:13px}}dialog.reading{width:min(850px,94vw);max-height:90vh;border:1px solid #bac9d9;border-radius:14px;padding:0;color:#17233a}dialog.reading::backdrop{background:#102b49aa}.reading-head{position:sticky;top:0;background:white;border-bottom:1px solid #dce4ee;padding:16px 20px;display:flex;align-items:center;gap:12px}.reading-head h2{margin:0;flex:1;overflow-wrap:anywhere}.reading-content{padding:4px 20px 22px;line-height:1.6;overflow-wrap:anywhere}.reading-section{border-top:1px solid #dce4ee;margin-top:16px;padding-top:4px}.reading-section h3{font-size:17px;margin-bottom:8px}.reading-section li{margin:10px 0}.reading-section dt{font-weight:650}.reading-section dd{margin:0 0 10px}#publicationOriginal{margin-top:20px;border:1px solid #bac9d9;border-radius:8px;padding:12px}#publicationOriginal summary{cursor:pointer;font-weight:650}#publicationOriginalText{white-space:pre-wrap;font:inherit;overflow-wrap:anywhere}@media(max-width:600px){dialog.reading{width:96vw;max-height:94vh}.reading-head,.reading-content{padding-left:12px;padding-right:12px}.reading-head h2{font-size:17px}.reading-head button{margin:0}}
+</style></head><body><header><div><b>AVM <span style="color:#d6b56d">Simples</span></b><div><small>Versão 2.2 · Gestão Jurídica e Central de Intimações</small></div></div><button class="btn secondary hidden" id="lock">Bloquear cofre</button></header><section class="login panel" id="auth"><h1 id="authTitle">Criar cofre AVM Simples</h1><p class="muted" id="authDesc">Defina uma senha para criptografar os dados do escritório neste navegador. Se esquecer a senha, não haverá recuperação.</p><form id="authForm"><div class="field"><label for="password">Senha do cofre</label><input autocomplete="new-password" id="password" minlength="12" placeholder="Mínimo de 12 caracteres" required="" type="password"/></div><div class="field" id="confirmField"><label for="confirm">Confirmar senha</label><input autocomplete="new-password" id="confirm" minlength="12" type="password"/></div><button class="btn gold" id="authSubmit">Criar cofre</button><p class="error" id="authError" role="alert"></p></form><p class="notice">Armazenamento local criptografado (IndexedDB com migração automática). Faça backups criptografados periódicos e guarde na pasta do aplicativo no Google Drive.</p></section><div class="layout hidden" id="app"><nav aria-label="Menu principal"><button class="active" data-view="inicio">⌂ Painel</button><button data-view="clientes">♙ Clientes</button><button data-view="processos">▤ Processos</button><button data-view="agenda">▦ Agenda jurídica</button><button data-view="documentos">▣ Documentos</button><button data-view="intimacoes">⚖ Intimações</button><button data-view="backup">⇩ Backup e segurança</button></nav><main><div class="notice">AVM Simples 2.2 · Uso interno do escritório. Conexão Gmail disponível em endereço HTTPS autorizado (somente leitura, sincronização a cada 30 minutos com a aba aberta). Não substitui a conferência oficial nos autos nem valida prazos.</div><section class="view" id="inicio"><h1>Painel do escritório</h1><div class="grid"><div class="panel"><div class="muted">Clientes cadastrados</div><div class="stat" id="nClients">0</div></div><div class="panel"><div class="muted">Processos cadastrados</div><div class="stat" id="nCases">0</div></div></div><div class="panel"><h2>Próximos compromissos cadastrados</h2><p class="muted">Agenda local para conferência; prazos judiciais devem ser confirmados nos autos e no tribunal.</p><div class="scroll"><table><thead><tr><th>Data</th><th>Compromisso</th><th>Processo / Cliente</th></tr></thead><tbody id="nextEvents"></tbody></table></div></div><div class="panel"><h2>Conferência de comunicações</h2><p id="dashboardInbox" class="muted">Abra a central de intimações para conferir as publicações registradas.</p><button type="button" class="btn secondary" id="openInboxDashboard">Abrir central de intimações</button></div><div class="panel"><h2>Como usar</h2><p>Cadastre clientes e processos, acompanhe intimações, bloqueie o cofre quando terminar e exporte uma cópia de segurança criptografada. A senha nunca é enviada para servidor. Todos os dados ficam criptografados no IndexedDB deste navegador.</p></div></section><section class="view hidden" id="clientes"><h1>Clientes</h1><div class="panel"><h2 id="clientFormTitle">Novo cliente</h2><form id="clientForm"><input id="clientId" type="hidden"/><div class="grid"><div class="field"><label for="clientName">Nome *</label><input id="clientName" maxlength="120" placeholder="Ex.: João da Silva" required=""/></div><div class="field"><label for="clientPhone">Telefone (opcional)</label><input id="clientPhone" maxlength="25" placeholder="(11) 99999-9999"/></div></div><div class="grid"><div class="field"><label for="clientDoc">CPF/CNPJ</label><input id="clientDoc" maxlength="22" placeholder="000.000.000-00"/></div><div class="field"><label for="clientEmail">E-mail</label><input id="clientEmail" maxlength="160" type="email"/></div><div class="field"><label for="clientAddress">Endereço</label><input id="clientAddress" maxlength="220"/></div><div class="field"><label for="clientWhatsapp">WhatsApp</label><input id="clientWhatsapp" maxlength="25"/></div></div><div class="field"><label for="clientNotes">Observações</label><textarea id="clientNotes" maxlength="800" rows="2"></textarea></div><button class="btn">Salvar cliente</button><button class="btn secondary" id="clearClient" type="button">Limpar formulário</button></form></div><div class="panel"><div class="toolbar"><h2 style="margin-right:auto">Lista de clientes</h2><input aria-label="Buscar clientes" id="clientSearch" placeholder="Buscar pelo nome"/></div><div class="scroll"><table><thead><tr><th>Nome</th><th>Telefone</th><th>Processos</th><th>Ações</th></tr></thead><tbody id="clientRows"></tbody></table></div></div></section><section class="view hidden" id="processos"><h1>Processos</h1><div class="panel"><h2 id="caseFormTitle">Novo processo</h2><form id="caseForm"><input id="caseId" type="hidden"/><div class="grid"><div class="field"><label for="caseNumber">Número CNJ *</label><input id="caseNumber" maxlength="25" placeholder="0000000-00.0000.0.00.0000" required=""/></div><div class="field"><label for="caseClient">Cliente *</label><select id="caseClient" required=""></select></div><div class="field"><label for="caseArea">Área</label><select id="caseArea"><option>Trabalhista</option><option>Previdenciária</option><option>Família</option><option>Cível</option><option>Outra</option></select></div><div class="field"><label for="caseStatus">Situação</label><select id="caseStatus"><option>Em andamento</option><option>Suspenso</option><option>Encerrado</option><option>A conferir</option></select></div></div><div class="grid"><div class="field"><label for="caseCourt">Tribunal</label><input id="caseCourt" maxlength="90" placeholder="Ex.: TRT-2"/></div><div class="field"><label for="caseUnit">Vara / Unidade</label><input id="caseUnit" maxlength="140"/></div><div class="field"><label for="caseParties">Partes</label><input id="caseParties" maxlength="220"/></div><div class="field"><label for="casePhase">Fase processual</label><select id="casePhase"><option>Conhecimento</option><option>Recursal</option><option>Execução</option><option>Administrativa</option><option>Outra</option></select></div></div><div class="field"><label for="caseNotes">Observações</label><textarea id="caseNotes" maxlength="800" rows="2"></textarea></div><button class="btn">Salvar processo</button><button class="btn secondary" id="clearCase" type="button">Limpar formulário</button></form></div><div class="panel"><div class="toolbar"><h2 style="margin-right:auto">Lista de processos</h2><input aria-label="Buscar processos" id="caseSearch" placeholder="Buscar número ou cliente"/></div><div class="scroll"><table><thead><tr><th>Número</th><th>Cliente</th><th>Área / Situação</th><th>Ações</th></tr></thead><tbody id="caseRows"></tbody></table></div></div></section><section class="view hidden" id="agenda"><h1>Agenda jurídica</h1><div class="panel"><h2 id="eventFormTitle">Novo compromisso</h2><form id="eventForm"><input id="eventId" type="hidden"/><div class="grid"><div class="field"><label for="eventTitle">Descrição *</label><input id="eventTitle" maxlength="140" placeholder="Ex.: Audiência de instrução" required=""/></div><div class="field"><label for="eventType">Tipo</label><select id="eventType"><option>Audiência</option><option>Perícia</option><option>Prazo</option><option>Reunião</option><option>Outro</option></select></div><div class="field"><label for="eventDate">Data *</label><input id="eventDate" required="" type="date"/></div><div class="field"><label for="eventTime">Horário (opcional)</label><input id="eventTime" type="time"/></div><div class="field"><label for="eventCase">Processo (opcional)</label><select id="eventCase"></select></div><div class="field"><label for="eventStatus">Situação</label><select id="eventStatus"><option>Pendente</option><option>Concluído</option><option>Cancelado</option></select></div></div><div class="field"><label for="eventNotes">Observações</label><textarea id="eventNotes" maxlength="800" rows="2"></textarea></div><p class="notice">Datas informativas. Confira sempre os prazos nos autos e no tribunal: o sistema não calcula automaticamente dias úteis, feriados, suspensões nem termo inicial.</p><button class="btn">Salvar compromisso</button><button class="btn secondary" id="clearEvent" type="button">Limpar formulário</button></form><p id="agendaSaveStatus" role="status" aria-live="polite" style="font-weight:600;margin:12px 0"></p></div><div class="panel" id="deadlineCalcPanel"><h2>Calculadora assistida de prazos (CPC / CLT)</h2><p class="muted">Simula vencimentos considerando finais de semana, feriados nacionais, 9 de julho (SP) e recesso forense (20/12 a 20/01, art. 220 CPC). <strong>Uso auxiliar: confirme sempre feriados locais, suspensões e o marco inicial nos autos.</strong></p><div class="grid"><div class="field"><label for="calcBaseDate">Data da publicação / ciência</label><input id="calcBaseDate" type="date"/></div><div class="field"><label for="calcDays">Quantidade de dias</label><input id="calcDays" type="number" min="1" max="365" value="15"/></div><div class="field"><label for="calcMode">Contagem</label><select id="calcMode"><option value="uteis">Dias úteis (CPC / CLT)</option><option value="corridos">Dias corridos</option></select></div><div class="field"><label style="display:flex;align-items:center;gap:8px;margin-top:26px"><input id="calcRecess" type="checkbox" checked style="width:auto"/>Considerar recesso forense (20/12 a 20/01)</label></div></div><div class="toolbar"><button type="button" class="btn secondary" id="calcRun">Calcular sugestão</button><button type="button" class="btn gold hidden" id="calcApply">Usar esta data no formulário acima</button></div><p id="calcResult" class="muted" role="status" aria-live="polite"></p></div><div class="panel"><div class="toolbar"><h2 style="margin-right:auto">Compromissos</h2><select aria-label="Filtrar por tipo" id="eventTypeFilter" style="max-width:170px"><option value="all">Todos os tipos</option><option value="Prazo">Prazos</option><option value="Audiência">Audiências</option><option value="Perícia">Perícias</option><option value="Reunião">Reuniões</option><option value="Outro">Outros</option></select><select aria-label="Filtrar por situação" id="eventStatusFilter" style="max-width:165px"><option value="all">Todas situações</option><option value="Pendente">Pendentes</option><option value="Concluído">Concluídos</option><option value="Cancelado">Cancelados</option></select><input aria-label="Buscar compromissos" id="eventSearch" placeholder="Buscar compromisso"/><button type="button" class="btn secondary" id="exportIcsAll">Exportar agenda (.ics)</button></div><div class="scroll"><table><thead><tr><th>Data</th><th>Compromisso</th><th>Processo / Cliente</th><th>Situação</th><th>Ações</th></tr></thead><tbody id="eventRows"></tbody></table></div></div></section><section class="view hidden" id="documentos"><h1>Documentos jurídicos</h1><p class="notice">Escolha um arquivo PDF, Word ou imagem do computador. O nome e a categoria serão sugeridos automaticamente, com busca assistida de cliente e processo. O anexo é salvo no cofre criptografado (IndexedDB) e incluído no backup. Limite recomendado: 5 MB por arquivo.</p><div class="panel"><h2 id="docFormTitle">Novo documento</h2><form id="docForm"><input id="docId" type="hidden"/><div class="field" style="padding:14px;background:#edf4fa;border:1px dashed #7191ae;border-radius:9px"><label for="docUpload">📎 Selecionar documento da pasta do computador</label><input accept=".pdf,.doc,.docx,.jpg,.jpeg,.png,.txt" id="docUpload" style="margin-top:8px" type="file"/><small class="muted" id="uploadInfo">Escolha o arquivo; o nome será preenchido automaticamente. Máximo 5 MB. O cliente continua obrigatório para organizar o documento.</small></div><div aria-live="polite" class="notice" id="docHints" style="margin:12px 0"><b>Identificação assistida:</b> selecione um arquivo para procurar possíveis clientes e processos pelo nome do arquivo. Nenhuma vinculação será feita sem sua confirmação.</div><div class="grid"><div class="field"><label for="docTitle">Nome do documento *</label><input id="docTitle" maxlength="140" placeholder="Ex.: Procuração Ad Judicia" required=""/></div><div class="field"><label for="docType">Categoria</label><select id="docType"><option>Procuração</option><option>Contrato</option><option>Petição</option><option>Sentença</option><option>Laudo</option><option>Documento pessoal</option><option>Outro</option></select></div><div class="field"><label for="docClient">Cliente *</label><select id="docClient" required=""></select></div><div class="field"><label for="docCase">Processo (opcional)</label><select id="docCase"></select></div><div class="field"><label for="docDate">Data do documento</label><input id="docDate" type="date"/></div><div class="field"><label for="docRef">Nome do arquivo</label><input id="docRef" maxlength="180" placeholder="Ex.: procuracao_cliente.pdf"/></div></div><div class="field"><label for="docNotes">Descrição</label><textarea id="docNotes" maxlength="600" rows="2"></textarea></div><button class="btn">Salvar documento</button><button class="btn secondary" id="clearDoc" type="button">Limpar</button></form></div><div class="panel"><div class="toolbar"><h2 style="margin-right:auto">Catálogo de documentos</h2><input aria-label="Pesquisar documentos" id="docSearch" placeholder="Pesquisar título, cliente ou categoria"/></div><div class="scroll"><table><thead><tr><th>Documento</th><th>Cliente / Processo</th><th>Referência</th><th>Ações</th></tr></thead><tbody id="docRows"></tbody></table></div></div></section><section class="view hidden" id="intimacoes"><h1>Intimações e publicações</h1><div class="panel" id="localSummary"><h2>Fila de conferência (local)</h2><p class="muted">Mostra comunicações que ainda precisam de atenção. Não calcula nem confirma prazos.</p><div class="grid"><div><div class="stat" id="todoOfficial">0</div><div class="muted">Publicações para conferir</div></div><div><div class="stat" id="todoPush">0</div><div class="muted">Avisos informativos pendentes</div></div><div><div class="stat" id="todoOther">0</div><div class="muted">Outras comunicações pendentes</div></div><div><div class="stat" id="todoUnlinked">0</div><div class="muted">Registros sem processo vinculado</div></div></div><p class="muted" id="localSummaryNote">Conecte o Gmail ou importe arquivos .eml/.txt e confira os registros abaixo.</p><div class="toolbar"><button class="btn secondary" id="filterPendingOfficial" type="button">Mostrar publicações oficiais pendentes</button><button class="btn secondary" id="filterUnreviewed" type="button">Mostrar todos os pendentes</button><button class="btn gold" id="generateTriageReport" type="button">Gerar relatório de triagem</button></div></div><div class="panel" id="gmailPanel"><h2>Gmail — conexão oficial, somente leitura</h2>
+<p class="muted">Use esta versão no endereço publicado do AVM Simples. A conexão Google já está configurada.</p>
+<div class="grid"><div class="field"><strong>Conexão com Gmail</strong><p class="muted">Clique em Conectar Gmail e escolha sua conta Google. Acesso somente para leitura. As comunicações importadas serão guardadas no cofre criptografado deste navegador.</p><input id="gmailClientId" autocomplete="off" value="293661527325-hunajp2u9gbnt8gtfvedij5jn924cl2u.apps.googleusercontent.com" type="hidden"/></div><div class="field"><label for="gmailStatus">Status da conexão</label><div class="notice" id="gmailStatus" role="status">Desconectado — nenhuma consulta automática ativa.</div></div></div>
+<div class="toolbar"><button class="btn" id="gmailConnect" type="button">Conectar Gmail (Google OAuth)</button><button class="btn secondary" id="gmailFetch" type="button" disabled>Consultar agora</button><button class="btn secondary" id="gmailDisconnect" type="button" disabled>Desconectar</button></div>
+<p class="muted">A consulta busca e-mails judiciais dos últimos 15 dias e grava as novas comunicações no cofre. Ela roda ao clicar em Consultar agora e a cada 30 minutos enquanto esta aba estiver visível, o cofre estiver desbloqueado e a autorização estiver válida. Não altera, envia ou exclui mensagens. O acesso pode expirar e exigir nova autorização. A filtragem é assistida e pode produzir falsos positivos ou deixar de identificar avisos; conferência no tribunal continua necessária.</p>
+</div><div class="panel" id="importPanel"><h2>Comunicações importadas e classificadas</h2><p class="notice">Gmail conectado ao ChatGPT não significa Gmail conectado ao arquivo local. O AVM também importa EML e TXT; a conexão direta com o Gmail só pode ser ativada a partir de endereço HTTPS com OAuth autorizado. DJEN/OAB continua sem conexão automática.</p><div class="grid"><div class="field"><label for="emlFiles">Importar e-mails do Gmail (.eml; múltiplos arquivos)</label><input accept=".eml,message/rfc822" id="emlFiles" multiple="" type="file"/><small class="muted">No Gmail, abra uma mensagem e use Mais ⋮ → Fazer download da mensagem. Importe vários arquivos de uma vez.</small></div><div class="field"><label for="djenFiles">Importar textos do DJEN (.txt)</label><input accept=".txt,text/plain" id="djenFiles" multiple="" type="file"/><small class="muted">Salve o texto da publicação em TXT e escolha o arquivo.</small></div></div><div class="toolbar"><button class="btn" id="importMessages" type="button">Importar arquivos selecionados</button><button class="btn secondary" id="addSampleMail" type="button">Criar e-mail fictício para testar</button></div><div class="muted" id="importResult" role="status">Nenhum arquivo importado nesta sessão.</div><h3>Comunicações importadas para conferência</h3><p class="notice">Atenção: “Conferido” indica apenas revisão manual do registro. Não comprova intimação, nem inicia ou valida prazo. Mensagens sem origem oficial identificada permanecem para conferência humana.</p><div class="scroll"><table><thead><tr><th>Origem / Assunto</th><th>Classificação</th><th>Processo</th><th>Data</th><th>Conferência</th><th>Ações</th></tr></thead><tbody id="inboxRows"></tbody></table></div><p class="muted">O número CNJ reconhecido no texto não significa que o processo esteja vinculado. Use “Vincular processo” para associá-lo. As ações de conferência são independentes. Duplicados são sinalizados. Nenhum prazo é calculado.</p></div><div class="panel" id="unregisteredPanel"><h2>Processos não cadastrados</h2><p class="muted">Comunicações com número CNJ ainda não vinculado a um processo do cadastro. Nenhum processo é criado automaticamente. Os registros permanecem disponíveis para análise e posterior vinculação manual.</p><div class="toolbar"><button type="button" class="btn secondary" id="refreshUnregistered">Atualizar lista</button><span class="pill" id="unregisteredCount">0 comunicações</span></div><div class="scroll"><table><thead><tr><th>Número identificado</th><th>Origem e assunto</th><th>Data</th><th>Ações</th></tr></thead><tbody id="unregisteredRows"></tbody></table></div></div><div class="panel" id="triagePanel"><h2>Triagem automática dos arquivos importados</h2><p class="muted">Reconhece padrões do Recorte Digital OAB/SP, TRT-2, TRF-3, e-SAJ e eproc. Distingue publicação de origem indicada, aviso PUSH, possível intimação sem origem confirmada e mensagem não classificada. Nenhuma data é calculada como prazo.</p><div class="grid"><div><label for="filterNature">Natureza da comunicação</label><select id="filterNature"><option value="all">Todas</option><option value="official">Publicação / intimação (conferir)</option><option value="informative">Aviso informativo PUSH</option><option value="other">Outras / indefinidas</option></select></div><div><label for="filterReview">Situação</label><select id="filterReview"><option value="all">Todas</option><option value="pending">Pendentes</option><option value="reviewed">Conferidas</option></select></div></div><div class="notice" id="triageSummary" style="margin-top:14px">Importe arquivos para analisar.</div><p class="muted" style="font-size:13px">Identificação por heurísticas locais; sempre confira a fonte oficial antes de qualquer providência. Um aviso PUSH não equivale necessariamente à intimação. A mesma decisão pode chegar de fontes distintas e requer conferência para evitar duplicidade.</p></div><p class="notice">Além da importação de arquivos, há registro manual demonstrativo. Não há consulta automática direta ao DJEN, aos tribunais ou ao WhatsApp. O Gmail pode ser consultado por OAuth em HTTPS autorizado. Não use a sugestão de data como cálculo jurídico de prazo: confira o teor da intimação, regras de publicação, dias úteis, feriados, suspensões e o tribunal competente.</p><div class="panel"><h2 id="pubFormTitle">Nova intimação manual</h2><form id="pubForm"><input id="pubId" type="hidden"/><div class="grid"><div class="field"><label for="pubCase">Processo *</label><select id="pubCase" required=""></select></div><div class="field"><label for="pubSource">Origem *</label><select id="pubSource"><option>DJEN</option><option>E-mail</option><option>Portal do tribunal</option><option>Domicílio Judicial Eletrônico</option><option>Outra</option></select></div><div class="field"><label for="pubDate">Data da comunicação/publicação *</label><input id="pubDate" required="" type="date"/></div><div class="field"><label for="pubType">Natureza</label><select id="pubType"><option>Intimação</option><option>Publicação</option><option>Despacho</option><option>Decisão</option><option>Sentença</option><option>Acórdão</option><option>Outro</option></select></div><div class="field"><label for="pubStatus">Conferência</label><select id="pubStatus"><option>Pendente de conferência</option><option>Conferida</option><option>Providência concluída</option></select></div><div class="field"><label for="pubDeadline">Data limite informada pelo advogado (opcional)</label><input id="pubDeadline" type="date"/></div></div><div class="field"><label for="pubBody">Texto da comunicação *</label><textarea id="pubBody" maxlength="12000" placeholder="Cole aqui o teor da intimação ou publicação" required="" rows="6"></textarea></div><div class="field"><label for="pubNotes">Providência / observações</label><textarea id="pubNotes" maxlength="1500" placeholder="Ex.: conferir sentença e preparar recurso" rows="2"></textarea></div><button class="btn">Salvar intimação</button><button class="btn secondary" id="clearPub" type="button">Limpar</button><button class="btn secondary" id="detectPub" type="button">Procurar número CNJ no texto</button><p class="muted" id="pubHint" role="status">O sistema poderá localizar um número CNJ no texto e sugerir o processo cadastrado. Você deverá confirmar.</p></form></div><div class="panel"><div class="toolbar"><h2 style="margin-right:auto">Comunicações registradas</h2><input aria-label="Pesquisar intimações" id="pubSearch" placeholder="Buscar processo, origem, texto"/></div><div class="scroll"><table><thead><tr><th>Data / origem</th><th>Processo</th><th>Natureza / situação</th><th>Data limite (manual)</th><th>Ações</th></tr></thead><tbody id="pubRows"></tbody></table></div></div></section><section class="view hidden" id="backup"><h1>Backup e segurança</h1><div class="panel"><h2>Relatórios locais para conferência</h2><p class="muted">Exporte tabelas CSV dos clientes, processos e compromissos para consulta em planilha. <strong>Os arquivos CSV não são criptografados</strong>: guarde-os em local seguro e não compartilhe informações confidenciais.</p><div class="toolbar"><button class="btn secondary" type="button" id="csvClients">Exportar clientes (CSV)</button><button class="btn secondary" type="button" id="csvCases">Exportar processos (CSV)</button><button class="btn secondary" type="button" id="csvEvents">Exportar agenda (CSV)</button></div></div><div class="panel"><h2>Exportar cópia criptografada</h2><p>O arquivo contém os dados cifrados e só pode ser aberto com a senha do cofre. Guarde uma cópia em local seguro, preferencialmente fora do computador.</p><button class="btn" id="export">Baixar backup criptografado</button><p class="muted" id="lastSaved"></p><p class="muted" id="storageInfo"></p></div><div class="panel"><h2>Restaurar backup</h2><p class="notice">A restauração substitui clientes, processos, compromissos e referências de documentos atuais. Antes de restaurar, exporte um backup do conteúdo atual.</p><div class="field"><label for="importFile">Selecione um backup AVM (.json)</label><input accept=".json,application/json" id="importFile" type="file"/></div><button class="btn secondary" id="import">Restaurar backup selecionado</button></div>
+<div class="panel">
+  <h2>Importar clientes e processos</h2>
+  <p class="muted">Selecione um arquivo de cadastros AVM (.json). Os dados são lidos neste navegador e gravados no cofre.</p>
+  <div class="field">
+    <label for="registryFile">Arquivo de cadastros</label>
+    <input accept=".json,application/json" id="registryFile" type="file"/>
+  </div>
+  <p id="registryStatus" class="muted" role="status"></p>
+  <button class="btn secondary" id="registrySave" type="button" disabled>Gravar cadastros no cofre</button>
+</div>
+<div class="panel"><h2>Limpar dados do cofre</h2><p>Exclui clientes, processos, compromissos, documentos e intimações do cofre atual, mantendo a senha.</p><button class="btn danger" id="wipe">Apagar todos os dados do cofre</button></div><div class="panel"><h2>Limitações de segurança</h2><p>Criptografia AES-256-GCM com chave derivada por PBKDF2-SHA256 (310.000 iterações) armazenada em IndexedDB. Uma senha não protege contra um computador comprometido ou extensões maliciosas. Mantenha backups criptografados atualizados na pasta do Google Drive e teste a restauração periodicamente.</p></div></section><footer>AVM Simples 2.2 · Uso interno do escritório · Confira sempre prazos e audiências nos autos oficiais</footer></main></div><div id="toast" role="status"></div><dialog class="reading" id="publicationReading" aria-labelledby="publicationReadingTitle"><div class="reading-head"><h2 id="publicationReadingTitle">Resumo da publicação</h2><button type="button" class="btn secondary" id="publicationReadingClose">Fechar</button></div><div class="reading-content" id="publicationReadingContent"></div></dialog><dialog class="reading" id="deadlineDialog" aria-labelledby="deadlineHeading"><div class="reading-head"><h2 id="deadlineHeading">Criar prazo ou audiência da comunicação</h2><button type="button" class="btn secondary" id="deadlineClose">Fechar</button></div><div class="reading-content"><p id="deadlineSource" class="muted"></p><p class="notice">Revise a comunicação original. Menções a dias não definem o vencimento: informe a data após conferir termo inicial, dias úteis, feriados e suspensões. Cada linha será um prazo na agenda.</p><details><summary>Consultar texto original</summary><pre id="deadlineOriginal" style="white-space:pre-wrap;font:inherit"></pre></details><form id="deadlineForm"><div class="field"><label for="deadlineCase">Processo *</label><select id="deadlineCase" required></select></div><div class="field"><label for="deadlineTasks">Providências — uma por linha *</label><textarea id="deadlineTasks" rows="5" maxlength="3000" required></textarea><small>Revise as sugestões. Máximo de 10 providências, com 140 caracteres cada.</small></div><div class="grid"><div class="field"><label for="deadlineType">Tipo na agenda *</label><select id="deadlineType"><option value="Prazo">Prazo</option><option value="Audiência">Audiência</option><option value="Perícia">Perícia</option><option value="Reunião">Reunião</option><option value="Outro">Outro</option></select></div><div class="field"><label for="deadlineTime">Horário (opcional — ex.: audiência)</label><input id="deadlineTime" type="time"></div></div><div class="panel" style="background:#f7fafe;padding:12px;margin:10px 0"><div class="grid"><div class="field" style="margin-bottom:6px"><label for="dlgCalcBase">Simular a partir da publicação</label><input id="dlgCalcBase" type="date"></div><div class="field" style="margin-bottom:6px"><label for="dlgCalcDays">Dias (úteis)</label><div style="display:flex;gap:6px"><input id="dlgCalcDays" type="number" min="1" max="365" value="15" style="max-width:90px"><select id="dlgCalcMode" style="max-width:130px"><option value="uteis">Úteis</option><option value="corridos">Corridos</option></select><button type="button" class="btn secondary" id="dlgCalcBtn" style="margin:0;white-space:nowrap">Simular</button></div></div></div><small id="dlgCalcNote" class="muted">Simulação auxiliar com feriados nacionais/SP e recesso (20/12–20/01). Confira nos autos antes de marcar a confirmação.</small></div><div class="field"><label for="deadlineDate">Data / vencimento confirmado *</label><input id="deadlineDate" type="date" required></div><label style="display:flex;align-items:start;gap:8px"><input id="deadlineConfirm" type="checkbox" required style="width:auto">Conferi as providências, o processo e a data de vencimento na fonte oficial.</label><p id="deadlineStatus" role="status" aria-live="polite"></p><button class="btn" id="deadlineSave">Salvar na agenda</button></form><div id="deadlineExisting"></div></div></dialog><dialog class="reading" id="triageReportDialog" aria-labelledby="triageReportTitle"><div class="reading-head"><h2 id="triageReportTitle">Relatório de Triagem de Intimações</h2><button type="button" class="btn secondary" id="triageReportDownload">Baixar HTML</button><button type="button" class="btn" id="triageReportPrint">Imprimir / PDF</button><button type="button" class="btn secondary" id="triageReportClose">Fechar</button></div><div class="reading-content" id="triageReportContent"></div></dialog><script>
+(()=>{'use strict';const KEY='avm_simples_v20_vault';let db={clients:[],cases:[],events:[],documents:[],publications:[]},password='',vault=null;const $=id=>document.getElementById(id);const encoder=new TextEncoder();const decoder=new TextDecoder();const bytes=n=>crypto.getRandomValues(new Uint8Array(n));const b64=a=>bufferToB64(a);const un64=s=>Uint8Array.from(atob(s),c=>c.charCodeAt(0));const uuid=()=>crypto.randomUUID();const notice=s=>{const t=$('toast');t.textContent=s;t.style.display='block';clearTimeout(notice.timer);notice.timer=setTimeout(()=>t.style.display='none',3500)};function error(s){$('authError').textContent=s}function safeParse(s){const d=JSON.parse(s);if(!d||!Array.isArray(d.clients)||!Array.isArray(d.cases))throw Error('Estrutura de dados inválida');d.events=Array.isArray(d.events)?d.events:[];d.documents=Array.isArray(d.documents)?d.documents:[];d.publications=Array.isArray(d.publications)?d.publications:[];d.inbox=Array.isArray(d.inbox)?d.inbox:[];return d}async function keyFor(pass,salt){const base=await crypto.subtle.importKey('raw',encoder.encode(pass),'PBKDF2',false,['deriveKey']);return crypto.subtle.deriveKey({name:'PBKDF2',salt,iterations:310000,hash:'SHA-256'},base,{name:'AES-GCM',length:256},false,['encrypt','decrypt'])}async function seal(data,pass){const salt=bytes(16),iv=bytes(12),key=await keyFor(pass,salt);const cipher=await crypto.subtle.encrypt({name:'AES-GCM',iv},key,encoder.encode(JSON.stringify(data)));return {format:'AVM-SIMPLES',version:1,kdf:'PBKDF2-SHA256',iterations:310000,cipher:'AES-256-GCM',salt:b64(salt),iv:b64(iv),payload:b64(new Uint8Array(cipher)),savedAt:new Date().toISOString()}}async function unseal(obj,pass){if(!obj||obj.format!=='AVM-SIMPLES'||obj.version!==1||obj.iterations!==310000||typeof obj.payload!=='string')throw Error('Arquivo de cofre inválido');const key=await keyFor(pass,un64(obj.salt));const plaintext=await crypto.subtle.decrypt({name:'AES-GCM',iv:un64(obj.iv)},key,un64(obj.payload));return safeParse(decoder.decode(plaintext))}let vaultStorageMode='IndexedDB',lastVaultBytes=0;
+function openVaultDB(){
+ return new Promise((resolve,reject)=>{
+  if(typeof indexedDB==='undefined'){reject(Error('IndexedDB indisponível'));return}
+  const req=indexedDB.open('avm_simples_db',1);
+  req.onupgradeneeded=()=>{const d=req.result;if(!d.objectStoreNames.contains('vault'))d.createObjectStore('vault')};
+  req.onsuccess=()=>resolve(req.result);
+  req.onerror=()=>reject(req.error||Error('Erro ao abrir IndexedDB'));
+ });
+}
+async function storageGet(k){
+ try{
+  const idb=await openVaultDB();
+  const val=await new Promise((resolve,reject)=>{
+   const tx=idb.transaction('vault','readonly');
+   const r=tx.objectStore('vault').get(k);
+   r.onsuccess=()=>resolve(r.result??null);
+   r.onerror=()=>reject(r.error);
+  });
+  idb.close();
+  vaultStorageMode='IndexedDB';
+  if(val!==null&&val!==undefined)return val;
+  const legacy=localStorage.getItem(k);
+  if(legacy){
+   try{await storageSet(k,legacy);localStorage.removeItem(k);}catch{}
+   return legacy;
+  }
+  return null;
+ }catch{
+  vaultStorageMode='localStorage (fallback)';
+  return localStorage.getItem(k);
+ }
+}
+async function storageSet(k,val){
+ try{
+  const idb=await openVaultDB();
+  await new Promise((resolve,reject)=>{
+   const tx=idb.transaction('vault','readwrite');
+   tx.objectStore('vault').put(val,k);
+   tx.oncomplete=()=>resolve();
+   tx.onerror=()=>reject(tx.error||Error('Erro ao gravar IndexedDB'));
+  });
+  idb.close();
+  vaultStorageMode='IndexedDB';
+  try{localStorage.removeItem(k)}catch{}
+ }catch{
+  vaultStorageMode='localStorage (fallback)';
+  localStorage.setItem(k,val);
+ }
+}
+function updateStorageInfo(sizeBytes){
+ if(typeof sizeBytes==='number')lastVaultBytes=sizeBytes;
+ const elInfo=$('storageInfo');
+ if(!elInfo)return;
+ const kb=lastVaultBytes?(lastVaultBytes/1024).toFixed(1)+' KB':'—';
+ elInfo.textContent='Armazenamento ativo: '+vaultStorageMode+' · Tamanho atual do cofre criptografado: '+kb;
+}
+async function persist(data=db,expectedVault){
+ const candidate=await seal(data,password);
+ const serialized=JSON.stringify(candidate);
+ if(expectedVault!==undefined&&(await storageGet(KEY))!==expectedVault)throw Error('O cofre mudou em outra aba. Abra a versão mais recente e tente novamente.');
+ await storageSet(KEY,serialized);
+ const written=await storageGet(KEY);
+ if(written!==serialized)throw Error('O navegador não confirmou a gravação local');
+ const verified=await unseal(JSON.parse(written),password);
+ if(verified.clients.length!==data.clients.length||verified.cases.length!==data.cases.length||verified.events.length!==data.events.length)throw Error('A conferência dos dados salvos falhou');
+ vault=candidate;
+ updateStorageInfo(serialized.length);
+ $('lastSaved').textContent='Última gravação conferida: '+new Date().toLocaleString('pt-BR');
+}
+async function authUI(){
+ const raw=await storageGet(KEY);
+ vault=JSON.parse(raw||'null');
+ updateStorageInfo(raw?raw.length:0);
+ $('authTitle').textContent=vault?'Abrir cofre AVM Simples':'Criar cofre AVM Simples';
+ $('authDesc').textContent=vault?'Digite sua senha para abrir os cadastros criptografados do escritório.':'Crie uma senha de no mínimo 12 caracteres. Se esquecer, não será possível recuperar os dados.';
+ $('confirmField').classList.toggle('hidden',!!vault);
+ $('authSubmit').textContent=vault?'Desbloquear':'Criar cofre';
+ $('auth').classList.remove('hidden');
+ $('app').classList.add('hidden');
+ $('lock').classList.add('hidden');
+ $('password').value='';
+ $('confirm').value='';
+ error('');
+}function showApp(){$('auth').classList.add('hidden');$('app').classList.remove('hidden');$('lock').classList.remove('hidden');render();show('inicio')}function show(v){document.querySelectorAll('.view').forEach(x=>x.classList.toggle('hidden',x.id!==v));document.querySelectorAll('nav button').forEach(x=>x.classList.toggle('active',x.dataset.view===v));if(v==='backup'){$('lastSaved').textContent='Última gravação: '+(vault?.savedAt?new Date(vault.savedAt).toLocaleString('pt-BR'):'não informada');updateStorageInfo()}}function el(tag,txt){const x=document.createElement(tag);x.textContent=txt??'';return x}function action(label,fn,cls='secondary'){const b=el('button',label);b.type='button';b.className='btn '+cls;b.addEventListener('click',fn);return b}function empty(tbody,n){const tr=el('tr'),td=el('td','Nenhum registro encontrado');td.colSpan=n;tr.append(td);tbody.append(tr)}function render(){renderDocs();renderPublications();renderLocalDashboard();renderUnregistered(); $('nClients').textContent=db.clients.length;$('nCases').textContent=db.cases.length;const sel=$('caseClient'),old=sel.value;sel.replaceChildren(el('option','Selecione um cliente'));sel.firstChild.value='';db.clients.slice().sort((a,b)=>a.name.localeCompare(b.name)).forEach(c=>{const o=el('option',c.name);o.value=c.id;sel.append(o)});sel.value=old;const es=$('eventCase'),prev=es.value;es.replaceChildren(el('option','Sem processo vinculado'));es.firstChild.value='';db.cases.forEach(p=>{const o=el('option',p.number);o.value=p.id;es.append(o)});es.value=prev;renderEvents();const q=$('clientSearch').value.toLocaleLowerCase('pt-BR'),cr=$('clientRows');cr.replaceChildren();let count=0;db.clients.filter(c=>c.name.toLocaleLowerCase('pt-BR').includes(q)).forEach(c=>{count++;const tr=el('tr');tr.append(el('td',c.name),el('td',c.phone||'—'),el('td',String(db.cases.filter(p=>p.clientId===c.id).length)));const td=el('td');td.append(action('Editar',()=>editClient(c)),action('Excluir',()=>deleteClient(c),'danger'));tr.append(td);cr.append(tr)});if(!count)empty(cr,4);const pq=$('caseSearch').value.toLocaleLowerCase('pt-BR'),pr=$('caseRows');pr.replaceChildren();count=0;db.cases.filter(p=>(p.number+' '+(db.clients.find(c=>c.id===p.clientId)?.name||'')).toLocaleLowerCase('pt-BR').includes(pq)).forEach(p=>{count++;const tr=el('tr');tr.append(el('td',p.number),el('td',db.clients.find(c=>c.id===p.clientId)?.name||'Cliente excluído'),el('td',p.area+' · '+p.status));const td=el('td');td.append(action('Editar',()=>editCase(p)),action('Excluir',()=>deleteCase(p),'danger'));tr.append(td);pr.append(tr)});if(!count)empty(pr,4)}function resetClient(){$('clientForm').reset();$('clientId').value='';$('clientFormTitle').textContent='Novo cliente'}function resetCase(){$('caseForm').reset();$('caseId').value='';$('caseFormTitle').textContent='Novo processo'}function editClient(c){show('clientes');$('clientId').value=c.id;$('clientName').value=c.name;$('clientPhone').value=c.phone;$('clientNotes').value=c.notes||'';['doc','email','address','whatsapp'].forEach(k=>{$('client'+k[0].toUpperCase()+k.slice(1)).value=c[k]||''});$('clientFormTitle').textContent='Editar cliente';window.scrollTo(0,0)}function editCase(p){show('processos');$('caseId').value=p.id;$('caseNumber').value=p.number;$('caseClient').value=p.clientId;$('caseArea').value=p.area;$('caseStatus').value=p.status;$('caseNotes').value=p.notes||'';['court','unit','parties','phase'].forEach(k=>{$('case'+k[0].toUpperCase()+k.slice(1)).value=p[k]||''});$('caseFormTitle').textContent='Editar processo';window.scrollTo(0,0)}async function deleteClient(c){if(db.cases.some(p=>p.clientId===c.id)||db.documents.some(d=>d.clientId===c.id)){notice('Exclua ou vincule os processos antes de remover este cliente.');return}if(!confirm('Excluir o cliente fictício '+c.name+'?'))return;db.clients=db.clients.filter(x=>x.id!==c.id);await persist();render();notice('Cliente excluído')}async function deleteCase(p){if(db.events.some(e=>e.caseId===p.id)||db.documents.some(d=>d.caseId===p.id)||db.publications.some(i=>i.caseId===p.id)){notice('Remova ou desvincule os compromissos antes de excluir o processo.');return}if(!confirm('Excluir o processo fictício '+p.number+'?'))return;db.cases=db.cases.filter(x=>x.id!==p.id);await persist();render();notice('Processo excluído')}function cnjValid(v){const s=v.replace(/\D/g,'');if(s.length!==20)return false;const body=s.slice(0,7)+s.slice(9),check=s.slice(7,9);return Number((BigInt(body+'00')%97n))===Number((98-Number(BigInt(body+'00')%97n))%97)||Number(check)===98-Number(BigInt(body+'00')%97n)}function cnjFormat(v){const s=v.replace(/\D/g,'');return s.length===20?`${s.slice(0,7)}-${s.slice(7,9)}.${s.slice(9,13)}.${s.slice(13,14)}.${s.slice(14,16)}.${s.slice(16)}`:v.trim()}$('authForm').addEventListener('submit',async e=>{e.preventDefault();const pass=$('password').value;error('');if(!crypto?.subtle){error('Este navegador não oferece criptografia Web Crypto neste contexto.');return}try{if(vault){db=await unseal(vault,pass)}else{if(pass.length<12)throw Error('Use uma senha de no mínimo 12 caracteres');if(pass!==$('confirm').value)throw Error('As senhas não coincidem');db={clients:[],cases:[],events:[],documents:[],publications:[]}}password=pass;if(!vault)await persist();showApp()}catch(err){password='';error(vault?'Senha incorreta ou cofre corrompido.':'Não foi possível criar o cofre: '+err.message)}});$('lock').addEventListener('click',()=>{registryInput=null;$('registryFile').value='';$('registryStatus').textContent='';$('registrySave').disabled=true;const deadline=$('deadlineDialog');if(deadline.open)deadline.close();clearDeadlineReview();const reading=$('publicationReading');if(reading.open)reading.close();$('publicationReadingContent').replaceChildren();gmailReset();db={clients:[],cases:[],events:[],documents:[],publications:[]};password='';authUI()});document.querySelectorAll('nav button').forEach(b=>b.addEventListener('click',()=>show(b.dataset.view)));$('clearClient').addEventListener('click',resetClient);$('clearCase').addEventListener('click',resetCase);$('clientSearch').addEventListener('input',render);$('caseSearch').addEventListener('input',render);$('eventSearch').addEventListener('input',renderEvents);$('clearEvent').addEventListener('click',resetEvent);$('clientForm').addEventListener('submit',async e=>{e.preventDefault();const id=$('clientId').value,name=$('clientName').value.trim(),phone=$('clientPhone').value.trim(),notes=$('clientNotes').value.trim();if(!name)return;if(db.clients.some(c=>c.id!==id&&c.name.toLocaleLowerCase('pt-BR')===name.toLocaleLowerCase('pt-BR'))){notice('Já existe um cliente com este nome.');return}const c={id:id||uuid(),name,phone,notes,...Object.fromEntries(['doc','email','address','whatsapp'].map(k=>[k,$('client'+k[0].toUpperCase()+k.slice(1)).value.trim()]))};if(id){db.clients=db.clients.map(x=>x.id===id?c:x)}else db.clients.push(c);await persist();resetClient();render();notice('Cliente salvo')});$('caseForm').addEventListener('submit',async e=>{e.preventDefault();const id=$('caseId').value,number=cnjFormat($('caseNumber').value),clientId=$('caseClient').value;if(!/^\d{7}-\d{2}\.\d{4}\.\d\.\d{2}\.\d{4}$/.test(number)){notice('Use o formato CNJ: 0000000-00.0000.0.00.0000');return}if(!db.clients.some(c=>c.id===clientId)){notice('Selecione um cliente cadastrado');return}if(db.cases.some(p=>p.id!==id&&p.number===number)){notice('Este número CNJ já está cadastrado');return}const p={id:id||uuid(),number,clientId,area:$('caseArea').value,status:$('caseStatus').value,notes:$('caseNotes').value.trim(),...Object.fromEntries(['court','unit','parties','phase'].map(k=>[k,$('case'+k[0].toUpperCase()+k.slice(1)).value.trim()]))};if(id)db.cases=db.cases.map(x=>x.id===id?p:x);else db.cases.push(p);await persist();resetCase();render();notice('Processo salvo')});function resetEvent(){$('eventForm').reset();$('eventId').value='';$('eventFormTitle').textContent='Novo compromisso'}function renderEvents(){
+ const tb=$('eventRows');tb.replaceChildren();
+ const q=$('eventSearch').value.toLocaleLowerCase('pt-BR');
+ const tf=$('eventTypeFilter')?.value||'all';
+ const sf=$('eventStatusFilter')?.value||'all';
+ const matches=db.events.slice().sort((a,b)=>(a.date+' '+(a.time||'')).localeCompare(b.date+' '+(b.time||''))).filter(e=>(tf==='all'||e.type===tf)&&(sf==='all'||e.status===sf)&&(e.title+' '+e.type+' '+e.status+' '+agendaProcessLabel(e.caseId)+' '+(db.cases.find(p=>p.id===e.caseId)?.number||'')).toLocaleLowerCase('pt-BR').includes(q));
+ for(const e of matches){
+  const tr=el('tr');
+  tr.append(el('td',e.date.split('-').reverse().join('/')+(e.time?' '+e.time:'')),el('td',e.type+' · '+e.title),el('td',agendaProcessLabel(e.caseId)),el('td',e.status));
+  const td=el('td');
+  td.append(action('Editar',()=>editEvent(e)),action('.ics',()=>exportEventsIcs([e],'AVM_'+e.type+'_'+e.date+'.ics')),action('Excluir',()=>deleteEvent(e),'danger'));
+  if(e.communicationId)td.append(action('Comunicação de origem',()=>{const source=imported().find(i=>i.id===e.communicationId);if(source)openPublicationReading(source,true);else notice('Comunicação removida. Referência: '+(e.communicationSubject||e.communicationId));}));
+  tr.append(td);tb.append(tr);
+ }
+ if(!matches.length)empty(tb,5);
+}function editEvent(e){show('agenda');$('eventId').value=e.id;$('eventTitle').value=e.title;$('eventType').value=e.type;$('eventDate').value=e.date;$('eventTime').value=e.time||'';$('eventCase').value=e.caseId||'';$('eventStatus').value=e.status;$('eventNotes').value=e.notes||'';$('eventFormTitle').textContent='Editar compromisso';window.scrollTo(0,0)}async function deleteEvent(e){if(!confirm('Excluir compromisso fictício?'))return;db.events=db.events.filter(x=>x.id!==e.id);await persist();render();notice('Compromisso excluído')}$('eventForm').addEventListener('submit',async ev=>{ev.preventDefault();const id=$('eventId').value;const e={...db.events.find(x=>x.id===id),id:id||uuid(),title:$('eventTitle').value.trim(),type:$('eventType').value,date:$('eventDate').value,time:$('eventTime').value,caseId:$('eventCase').value,status:$('eventStatus').value,notes:$('eventNotes').value.trim()};if(!e.title||!e.date){notice('Preencha descrição e data');return}if(e.caseId&&!db.cases.some(p=>p.id===e.caseId)){notice('Processo não encontrado');return}const oldEvents=db.events.slice();if(id)db.events=db.events.map(x=>x.id===id?e:x);else db.events.push(e);try{await persist();resetEvent();$('eventSearch').value='';render();$('agendaSaveStatus').textContent='Compromisso gravado e conferido no armazenamento deste navegador. Confira na lista abaixo.';$('agendaSaveStatus').className='success';notice('Compromisso salvo e verificado');}catch(err){db.events=oldEvents;$('agendaSaveStatus').textContent='ERRO: o compromisso NÃO foi salvo. '+(err?.name==='QuotaExceededError'?'Espaço local insuficiente.':'Armazenamento recusado ou inacessível.')+' Preserve seu backup e não dependa da agenda para prazos.';$('agendaSaveStatus').className='error';console.error('Falha ao salvar agenda',err);notice('ERRO: gravação não confirmada');}});$('export').addEventListener('click',()=>{const data=JSON.stringify(vault,null,2),url=URL.createObjectURL(new Blob([data],{type:'application/json'}));const a=document.createElement('a');a.href=url;a.download='AVM_Simples_Backup_'+new Date().toISOString().slice(0,10)+'.json';a.click();setTimeout(()=>URL.revokeObjectURL(url),1000);notice('Backup criptografado baixado')});$('import').addEventListener('click',async()=>{const file=$('importFile').files[0];if(!file){notice('Selecione um arquivo .json');return}if(file.size>15e6){notice('Backup acima do limite de 15 MB deste protótipo');return}try{const obj=JSON.parse(await file.text()),restored=await unseal(obj,password);const before='Conteúdo atual: '+db.clients.length+' cliente(s), '+db.cases.length+' processo(s), '+db.events.length+' compromisso(s), '+db.documents.length+' documento(s).';const after='Backup selecionado: '+restored.clients.length+' cliente(s), '+restored.cases.length+' processo(s), '+restored.events.length+' compromisso(s), '+restored.documents.length+' documento(s), '+(restored.inbox?.length||0)+' comunicação(ões).';if(!confirm(before+'\n'+after+'\n\nA RESTAURAÇÃO SUBSTITUI o conteúdo atual. Você já baixou um backup dos dados atuais?'))return;db=restored;await persist();resetClient();resetCase();resetDoc();resetPub();render();notice('Backup restaurado com sucesso')}catch(err){notice('Falha na restauração: backup inválido ou senha diferente.')}});$('wipe').addEventListener('click',async()=>{if(!confirm('Apagar TODOS os cadastros de teste? Esta ação não pode ser desfeita sem backup.'))return;db={clients:[],cases:[],events:[],documents:[],publications:[]};await persist();render();notice('Cadastros apagados')});function resetDoc(){$('docForm').reset();$('docId').value='';$('docFormTitle').textContent='Novo documento';$('uploadInfo').textContent='Escolha o arquivo; máximo 1 MB. O cliente continua obrigatório.';$('docHints').textContent='Identificação assistida: selecione um arquivo para procurar possíveis clientes e processos. Confira antes de aplicar.'}function renderDocs(){const csel=$('docClient'),old=csel.value;csel.replaceChildren(el('option','Selecione o cliente'));csel.firstChild.value='';db.clients.forEach(c=>{const o=el('option',c.name);o.value=c.id;csel.append(o)});csel.value=old;const psel=$('docCase'),prev=psel.value;psel.replaceChildren(el('option','Sem processo'));psel.firstChild.value='';db.cases.filter(p=>!csel.value||p.clientId===csel.value).forEach(p=>{const o=el('option',p.number);o.value=p.id;psel.append(o)});psel.value=prev;const tb=$('docRows');tb.replaceChildren();const q=$('docSearch').value.toLocaleLowerCase('pt-BR');const matches=db.documents.filter(d=>(d.title+' '+d.type+' '+(db.clients.find(c=>c.id===d.clientId)?.name||'')).toLocaleLowerCase('pt-BR').includes(q));for(const d of matches){const tr=el('tr');tr.append(el('td',d.title+' · '+d.type),el('td',(db.clients.find(c=>c.id===d.clientId)?.name||'Cliente indisponível')+' / '+(db.cases.find(p=>p.id===d.caseId)?.number||'—')),el('td',d.ref||'—'));const td=el('td');if(d.fileData)td.append(action('Baixar arquivo',()=>downloadDoc(d)));td.append(action('Editar',()=>editDoc(d)),action('Excluir',()=>deleteDoc(d),'danger'));tr.append(td);tb.append(tr)}if(!matches.length)empty(tb,4)}function editDoc(d){show('documentos');$('docId').value=d.id;$('docTitle').value=d.title;$('docType').value=d.type;$('docClient').value=d.clientId;renderDocs();$('docCase').value=d.caseId||'';$('docDate').value=d.date||'';$('docRef').value=d.ref||'';$('docNotes').value=d.notes||'';$('uploadInfo').textContent=d.fileData?'Arquivo já guardado: '+(d.fileName||d.ref)+' — selecione outro somente para substituir.':'Sem arquivo anexado';$('docFormTitle').textContent='Editar documento';window.scrollTo(0,0)}async function deleteDoc(d){if(!confirm('Excluir referência fictícia de documento?'))return;db.documents=db.documents.filter(x=>x.id!==d.id);await persist();render();notice('Referência excluída')}function bufferToB64(buf){const arr=new Uint8Array(buf);let out='';for(let i=0;i<arr.length;i+=8192)out+=String.fromCharCode(...arr.subarray(i,i+8192));return btoa(out)}function downloadDoc(d){if(!d.fileData){notice('Este registro não contém arquivo');return}try{const raw=atob(d.fileData),bytes=new Uint8Array(raw.length);for(let i=0;i<raw.length;i++)bytes[i]=raw.charCodeAt(i);const url=URL.createObjectURL(new Blob([bytes],{type:d.fileType||'application/octet-stream'}));const a=document.createElement('a');a.href=url;a.download=d.fileName||d.ref||'documento';a.click();setTimeout(()=>URL.revokeObjectURL(url),2000)}catch(e){notice('Erro ao recuperar o arquivo')}}function normalizeMatch(s){return String(s||'').normalize('NFD').replace(/[\u0300-\u036f]/g,'').toLocaleLowerCase('pt-BR').replace(/[^a-z0-9]+/g,' ').trim()}
+function suggestDocLinks(filename,txt=''){
+ const panel=$('docHints');panel.replaceChildren();
+ const heading=el('b','Identificação assistida — confirme as sugestões:');panel.append(heading);
+ const source=normalizeMatch(filename+' '+txt.slice(0,3000));
+ const words=new Set(source.split(/\s+/).filter(w=>w.length>=3));
+ const clients=db.clients.map(c=>({c,tokens:normalizeMatch(c.name).split(' ').filter(w=>w.length>=3)})).map(x=>({...x,score:x.tokens.filter(w=>words.has(w)).length})).filter(x=>x.score>=2||x.tokens.length===1&&x.score===1).sort((a,b)=>b.score-a.score).slice(0,3);
+ const nums=(filename+' '+txt.slice(0,3000)).match(/\d{7}[-. ]?\d{2}[. ]?\d{4}[. ]?\d[. ]?\d{2}[. ]?\d{4}/g)||[];
+ const digitNums=nums.map(x=>x.replace(/\D/g,''));
+ const cases=db.cases.filter(p=>digitNums.includes(p.number.replace(/\D/g,''))).slice(0,3);
+ if(!clients.length&&!cases.length){panel.append(el('p','Não foi encontrada correspondência segura pelo nome do arquivo. Selecione o cliente e o processo manualmente.'));return}
+ if(clients.length){panel.append(el('p','Possíveis clientes:'));for(const {c} of clients){const b=action('Usar cliente: '+c.name,()=>{$('docClient').value=c.id;renderDocs();$('docHints').append(el('p','Cliente selecionado: '+c.name+'. Confira o processo antes de salvar.'))});panel.append(b)}}
+ if(cases.length){panel.append(el('p','Número CNJ reconhecido:'));for(const p of cases){const c=db.clients.find(c=>c.id===p.clientId);panel.append(action('Vincular '+p.number+' ('+(c?.name||'cliente desconhecido')+')',()=>{$('docClient').value=p.clientId;renderDocs();$('docCase').value=p.id;$('docHints').append(el('p','Processo selecionado para conferência: '+p.number))}))}}
+ panel.append(el('p','A análise utiliza apenas o nome do arquivo e, para arquivos TXT, o texto. PDFs, Word e imagens não são lidos nesta versão.'));
+}
+$('docUpload').addEventListener('change',async()=>{const f=$('docUpload').files[0];if(!f)return;if(f.size>5242880){$('uploadInfo').textContent='Arquivo acima do limite de 5 MB; selecione outro.';$('docHints').textContent='Arquivo acima do limite recomendado de 5 MB.';return}
+const name=f.name.replace(/\.[^.]+$/,'');$('docTitle').value=name.replace(/[_-]+/g,' ').slice(0,140);$('docRef').value=f.name.slice(0,180);const n=normalizeMatch(name);const category=n.includes('procura')?'Procuração':n.includes('contrat')?'Contrato':n.includes('senten')?'Sentença':n.includes('laudo')?'Laudo':n.includes('peti')?'Petição':n.includes('rg')||n.includes('cpf')?'Documento pessoal':'Outro';$('docType').value=category;$('uploadInfo').textContent='Selecionado: '+f.name+' ('+Math.ceil(f.size/1024)+' KB). Confira o cliente e clique em Salvar documento.';
+let txt='';if(/\.txt$/i.test(f.name)){try{txt=(await f.text()).slice(0,3000)}catch(e){txt=''}}suggestDocLinks(f.name,txt);
+});
+$('docClient').addEventListener('change',()=>{const s=$('docCase');s.value='';renderDocs()});$('clearDoc').addEventListener('click',resetDoc);$('docSearch').addEventListener('input',renderDocs);$('docForm').addEventListener('submit',async e=>{e.preventDefault();const id=$('docId').value,clientId=$('docClient').value,caseId=$('docCase').value;if(!db.clients.some(c=>c.id===clientId)){notice('Selecione um cliente');return}if(caseId&&!db.cases.some(p=>p.id===caseId&&p.clientId===clientId)){notice('O processo não pertence ao cliente selecionado');return}const old=db.documents.find(x=>x.id===id);const d={...old,id:id||uuid(),title:$('docTitle').value.trim(),type:$('docType').value,clientId,caseId,date:$('docDate').value,ref:$('docRef').value.trim(),notes:$('docNotes').value.trim()};if(!d.title)return;const f=$('docUpload').files[0];if(f){if(f.size>5242880){notice('Arquivo acima de 5 MB. Escolha um arquivo menor.');return}if(!/\.(pdf|doc|docx|jpg|jpeg|png|txt)$/i.test(f.name)){notice('Formato não permitido');return}d.fileName=f.name;d.fileType=f.type||'application/octet-stream';d.fileData=bufferToB64(await f.arrayBuffer());d.ref=f.name}const prev=db.documents;if(id)db.documents=db.documents.map(x=>x.id===id?d:x);else db.documents.push(d);try{await persist()}catch(err){db.documents=prev;notice('Não foi possível salvar. O armazenamento do Chrome pode estar cheio.');return}resetDoc();render();notice('Documento de teste salvo no cofre')});
+// Importação local assistida de EML/TXT. Não há acesso à API Gmail ou DJEN.
+function normalCNJ(t){const m=String(t||'').match(/\b\d{7}-\d{2}\.\d{4}\.\d\.\d{2}\.\d{4}\b/);return m?m[0]:''}
+function decodeMimeWords(t){return String(t||'').replace(/=\?utf-8\?([bq])\?([^?]+)\?=/gi,(all,mode,val)=>{try{if(mode.toLowerCase()==='b'){const x=atob(val);return new TextDecoder('utf-8').decode(Uint8Array.from(x,c=>c.charCodeAt(0)))}return decodeURIComponent(val.replace(/_/g,' ').replace(/=([0-9a-f]{2})/gi,'%$1'))}catch(e){return all}})}
+function quotedPrintable(t){return String(t||'').replace(/=\r?\n/g,'').replace(/=([0-9A-Fa-f]{2})/g,(m,h)=>String.fromCharCode(parseInt(h,16)))}
+function parseEML(raw,fileName){let split=raw.search(/\r?\n\r?\n/);let headers=split<0?'':raw.slice(0,split);let body=split<0?raw:raw.slice(split).replace(/^\r?\n\r?\n/,'');headers=headers.replace(/\r?\n[ \t]+/g,' ');const h=k=>decodeMimeWords((headers.match(new RegExp('^'+k+':\\s*(.*)$','mi'))||[])[1]||'');const coding=h('Content-Transfer-Encoding').toLowerCase();if(coding==='quoted-printable')body=quotedPrintable(body);if(coding==='base64'&&!/multipart/i.test(h('Content-Type'))){try{body=new TextDecoder().decode(Uint8Array.from(atob(body.replace(/\s/g,'')),x=>x.charCodeAt(0)))}catch(e){}}
+// Tenta coletar parte text/plain de mensagens MIME; HTML não é executado.
+if(/multipart/i.test(h('Content-Type'))){const parts=body.split(/\r?\n--[^\r\n]+/);const plain=parts.find(p=>/Content-Type:\s*text\/plain/i.test(p));if(plain){const sep=plain.search(/\r?\n\r?\n/);if(sep>=0){let fragment=plain.slice(sep).replace(/^\r?\n\r?\n/,'');if(/quoted-printable/i.test(plain.slice(0,sep)))fragment=quotedPrintable(fragment);body=fragment}}}
+const when=new Date(h('Date'));return {source:'Gmail (arquivo EML)',subject:h('Subject')||fileName,from:h('From'),messageId:h('Message-ID'),date:isNaN(when.getTime())?new Date().toISOString().slice(0,10):when.toISOString().slice(0,10),body:body.slice(0,60000)}}
+function fingerprint(i){let str=(i.messageId||'').trim().toLowerCase();if(str)return 'msg:'+str;const core=[i.source,i.subject,i.date,i.body.slice(0,1500)].join('|');let h=2166136261;for(let j=0;j<core.length;j++){h^=core.charCodeAt(j);h=Math.imul(h,16777619)}return 'hash:'+(h>>>0).toString(16)}
+function suggestedCase(i){const numbers=Array.from((i.subject+' '+i.body).matchAll(/\b\d{7}-\d{2}\.\d{4}\.\d\.\d{2}\.\d{4}\b/g),x=>x[0]);const matched=db.cases.filter(c=>numbers.includes(c.number));return matched.length===1?matched[0].id:''}
+function imported(){db.inbox=Array.isArray(db.inbox)?db.inbox:[];return db.inbox}
+function classifyNotice(i){
+ const txt=(i.subject+' '+i.body).toLocaleLowerCase('pt-BR');
+ const recorte=/recorte digital|oab\/sp.*public|data de disponibiliza[cç][aã]o.*data de publica[cç][aã]o/i.test(txt);
+ const official=recorte||(/\bintima[cç][aã]o\b|\bpublica[cç][aã]o\b/i.test(txt)&&/dj(e|en)|di[aá]rio de justi[cç]a|identificador do documento/i.test(txt));
+ const push=/\[push\]|\[trt02\].*\[push\]|portal e-saj - andamento|pje push|movimenta[cç][oõ]es processuais|servi[cç]o push/i.test(txt);
+ const sender=(i.from||'').toLowerCase();
+ let origin=recorte?'Recorte Digital OAB/SP':/trt.?2|trt02|tribunal regional do trabalho/i.test(txt)?'TRT-2':/trf.?3|justi[cç]a federal da 3/i.test(txt)?'TRF-3':/eproc/i.test(txt)?'TJSP eproc':/e-saj|esaj/i.test(txt)?'TJSP e-SAJ':'Outra fonte';
+ const mentionsIntimation=/\bintima[cç][aã]o\b|\bpublica[cç][aã]o\b|\bdespacho\b|\bdecis[aã]o\b|\bsenten[cç]a\b|\bac[oó]rd[aã]o\b/i.test(txt);
+ let nature=official?'official':push?'informative':'other';
+ let label= nature==='official'?'Possível publicação oficial — validar fonte':nature==='informative'?'PUSH informativo':'Não classificado';
+ if(!official&&!push&&mentionsIntimation)label='Possível intimação — conferir origem';
+ if(/n[aã]o (tem|tendo) valor de intima[cç][aã]o/i.test(txt)){nature='informative';label='Aviso sem valor de intimação'}
+ const numbers=[...new Set((i.subject+' '+i.body).match(/\b\d{7}-\d{2}\.\d{4}\.\d\.\d{2}\.\d{4}\b/g)||[])];
+ const wordNums='(?:um|uma|dois|duas|tr[eê]s|quatro|cinco|seis|sete|oito|nove|dez|onze|doze|treze|catorze|quatorze|quinze|dezesseis|dezessete|dezoito|dezenove|vinte|trinta|quarenta(?:\\s+e\\s+oito)?|sessenta|noventa)';
+ const deadlineRe=new RegExp('(?:no\\s+prazo\\s+(?:legal\\s+|sucessivo\\s+|comum\\s+|improrrog[aá]vel\\s+)?de|prazo\\s+(?:legal\\s+)?de|em\\s+at[eé]|em|com\\s+prazo\\s+de)\\s*(?:\\d+\\s*(?:\\(\\s*'+wordNums+'\\s*\\))?|'+wordNums+')\\s*(?:dias?(?:\\s+(?:[uú]teis|corridos))?|horas?)','i');
+ const deadlineMatch=txt.match(deadlineRe);
+ const deadlineMention=!!deadlineMatch;
+ const deadlineText=deadlineMatch?deadlineMatch[0].replace(/\s+/g,' ').trim():'';
+ const hearingInfo=extractHearingInfo(i.subject+' '+i.body);
+ return {nature,label,origin,numbers,deadlineMention,deadlineText,hearingInfo};
+}
+function extractHearingInfo(raw){
+ const text=String(raw||'');
+ if(!/audi[eê]ncia/i.test(text))return null;
+ const ctxMatch=text.match(/audi[eê]ncia[\s\S]{0,180}/i);
+ const scope=ctxMatch?ctxMatch[0]:text;
+ const dateM=scope.match(/\b(\d{2})\/(\d{2})\/(\d{4})\b/);
+ const timeM=scope.match(/\b(\d{1,2})\s*(?:h|:)\s*(\d{2})\b|\b(\d{1,2})h\b/i);
+ let dateISO='',dateBR='',time='';
+ if(dateM){dateBR=dateM[1]+'/'+dateM[2]+'/'+dateM[3];dateISO=dateM[3]+'-'+dateM[2]+'-'+dateM[1];}
+ if(timeM){const hh=(timeM[1]||timeM[3]||'').padStart(2,'0');const mm=(timeM[2]||'00').padStart(2,'0');time=hh+':'+mm;}
+ const kindM=scope.match(/audi[eê]ncia\s+(?:de\s+)?(una|instru[cç][aã]o(?:\s+e\s+julgamento)?|concilia[cç][aã]o|inicial|telepresencial|presencial|virtual)/i);
+ const kind=kindM?'Audiência '+kindM[1]:'Audiência';
+ return {detected:true,kind,dateISO,dateBR,time};
+}
+function inferCourtFromCNJ(num){
+ const m=String(num||'').match(/\.(\d)\.(\d{2})\.\d{4}$/);
+ if(!m)return {court:'',area:'Outra'};
+ const seg=m[1]+'.'+m[2];
+ if(seg==='8.26')return {court:'TJSP (8.26)',area:'Cível'};
+ if(seg==='4.03')return {court:'TRF-3 (4.03)',area:'Previdenciária'};
+ if(seg==='5.02')return {court:'TRT-2 (5.02)',area:'Trabalhista'};
+ if(seg==='5.15')return {court:'TRT-15 (5.15)',area:'Trabalhista'};
+ if(m[1]==='5')return {court:'TRT ('+seg+')',area:'Trabalhista'};
+ if(m[1]==='4')return {court:'TRF ('+seg+')',area:'Previdenciária'};
+ if(m[1]==='8')return {court:'TJ ('+seg+')',area:'Cível'};
+ return {court:seg,area:'Outra'};
+}
+function extractRecorteEntries(i){
+ if(!/recorte digital|recorte digital oab/i.test(i.subject+' '+i.body))return [i];
+ const pieces=i.body.split(/(?=Publica[cç][aã]o:\s*\d+\.)/i).slice(1);
+ if(pieces.length<2)return [i];
+ return pieces.map((block,k)=>({...i,subject:i.subject+' — Item '+(k+1),body:block,messageId:i.messageId?i.messageId+':item'+(k+1):'',source:'Recorte Digital OAB/SP'}));
+}
+async function ingest(items){
+ const inbox=imported();let added=0,duplicates=0;const expanded=items.flatMap(extractRecorteEntries);
+ for(const item of expanded){item.fp=fingerprint(item);if(inbox.some(x=>x.fp===item.fp)){duplicates++;continue}item.id=uuid();item.caseId=suggestedCase(item);item.reviewed=false;inbox.push(item);added++}
+ try{await persist();renderInbox();$('importResult').textContent=added+' comunicação(ões) importada(s); '+duplicates+' duplicada(s) idêntica(s) ignorada(s).';return {added,duplicates}}catch(e){inbox.splice(inbox.length-added,added);$('importResult').textContent='Falha ao salvar. Verifique o espaço livre e o backup.';throw e}
+}
+function renderUnregistered(){
+ const tb=$('unregisteredRows');if(!tb)return;
+ tb.replaceChildren();
+ const unlinked=imported().filter(i=>!i.caseId||!db.cases.some(c=>c.id===i.caseId));
+ $('unregisteredCount').textContent=unlinked.length+' comunicação(ões)';
+ for(const i of unlinked.slice().sort((a,b)=>(b.date||'').localeCompare(a.date||''))){
+  const cls=classifyNotice(i),tr=el('tr');
+  tr.append(el('td',cls.numbers.join(', ')||'Número não identificado'),el('td',(i.from||cls.origin)+' · '+(i.subject||'Sem assunto').slice(0,120)),el('td',i.date||'—'));
+  const td=el('td');td.append(action('Resumo',()=>openPublicationReading(i)),action('Ler',()=>openPublicationReading(i,true)));
+  if(cls.numbers.length){
+   const firstNum=cls.numbers[0];
+   td.append(action('Cadastrar processo',()=>{
+    resetCase();
+    const info=inferCourtFromCNJ(firstNum);
+    $('caseNumber').value=firstNum;
+    if(info.court)$('caseCourt').value=info.court;
+    if(info.area)$('caseArea').value=info.area;
+    show('processos');
+    $('caseClient').focus();
+    notice('Número CNJ preenchido ('+firstNum+'). Selecione o cliente e salve o processo.');
+   },''));
+  }
+  const link=action('Conferir vínculo',()=>{$('filterNature').value='all';$('filterReview').value='all';renderInbox();document.getElementById('importPanel').scrollIntoView({behavior:'smooth'});notice('Procure a comunicação na tabela e use Vincular processo.');});td.append(link);tr.append(td);tb.append(tr)
+ }
+ if(!unlinked.length)empty(tb,4)
+}
+$('refreshUnregistered').addEventListener('click',renderUnregistered);
+function renderInbox(){
+ const tb=$('inboxRows');if(!tb)return;tb.replaceChildren();
+ const all=imported().map(i=>({i,c:classifyNotice(i)}));
+ const counts={official:0,informative:0,other:0};all.forEach(o=>counts[o.c.nature]++);
+  renderUnregistered();
+ $('triageSummary').textContent=all.length+' registro(s): '+counts.official+' possível(is) publicação(ões) oficial(is); '+counts.informative+' aviso(s) informativo(s); '+counts.other+' outra(s) comunicação(ões), inclusive suspeitas sem origem confirmada.';
+ const pending=all.filter(o=>!o.i.reviewed);$('todoOfficial').textContent=pending.filter(o=>o.c.nature==='official').length;$('todoPush').textContent=pending.filter(o=>o.c.nature==='informative').length;$('todoOther').textContent=pending.filter(o=>o.c.nature==='other').length;$('todoUnlinked').textContent=all.filter(o=>!o.i.caseId).length;$('localSummaryNote').textContent=all.length?'Conferência humana obrigatória: todo aviso pode precisar ser confirmado na fonte oficial.':'Nenhuma mensagem importada ainda. Conecte o Gmail ou importe arquivos .eml/.txt.';
+ const nf=$('filterNature').value,rf=$('filterReview').value;
+ const items=all.filter(({i,c})=>(nf==='all'||c.nature===nf)&&(rf==='all'||(rf==='reviewed'?i.reviewed:!i.reviewed))).sort((a,b)=>(b.i.date||'').localeCompare(a.i.date||''));
+ for(const {i,c} of items){
+ const tr=el('tr'),cas=db.cases.find(x=>x.id===i.caseId),num=cas?.number||c.numbers[0]||'Não identificado';
+ const near=all.filter(o=>o.i.id!==i.id && o.c.numbers.some(n=>c.numbers.includes(n)) && o.c.nature===c.nature).length;
+ const flags=(c.deadlineMention?' · prazo ('+c.deadlineText+')':'')+(c.hearingInfo?' · '+c.hearingInfo.kind+(c.hearingInfo.dateBR?' em '+c.hearingInfo.dateBR+(c.hearingInfo.time?' às '+c.hearingInfo.time:''):''):'')+(near?' · '+near+' outro(s) registro(s) do processo':'');
+ tr.append(el('td',c.origin+' · '+(i.subject||'').slice(0,90)+(i.account?' · Conta: '+i.account:'')),el('td',c.label+flags),el('td',num+(cas?' · Vinculado':' · Sem vínculo cadastrado')),el('td',i.date||'—'),el('td',i.reviewed?'Conferido':'Pendente'));
+ const td=el('td');
+ td.append(
+   action('Resumo',()=>openPublicationReading(i)),
+   action('Ler',()=>openPublicationReading(i,true)),
+   action(db.events.some(e=>e.communicationId===i.id)?'Ver prazos criados':'Criar prazo',()=>openCommunicationDeadline(i)),
+   action('Vincular processo',async()=>{
+     if(!db.cases.length){notice('Não há processos cadastrados. Cadastre um processo primeiro.');return}
+     const opts=db.cases.map((x,j)=>(j+1)+': '+x.number).join('\n');
+     const previous=i.caseId;
+     const index=prompt('Escolha o número da lista para vincular. Digite 0 para retirar o vínculo. Cancelar não altera nada:\n'+opts, i.caseId?String(db.cases.findIndex(x=>x.id===i.caseId)+1):'');
+     if(index===null)return;
+     const n=Number(index.trim());
+     if(index.trim()==='0'){i.caseId=''}
+     else if(!/^\d+$/.test(index.trim())||n<1||n>db.cases.length){notice('Informe um número válido da lista ou 0 para desvincular.');return}
+     else{i.caseId=db.cases[n-1].id}
+     try{await persist();renderInbox();notice(i.caseId?'Processo vinculado':'Vínculo removido')}catch(err){i.caseId=previous;notice('Não foi possível salvar a vinculação')}
+   }),
+   action(i.reviewed?'Conferida — desfazer':'Marcar como conferida',async()=>{
+     const next=!i.reviewed;
+     const previous=i.reviewed;i.reviewed=next;
+     try{await persist();renderInbox();notice(next?'Revisão registrada':'Comunicação retornou para pendente')}catch(err){i.reviewed=previous;notice('Não foi possível salvar a situação')}
+   }),
+   action('Excluir',async()=>{if(!confirm('Excluir esta importação de teste?'))return;db.inbox=db.inbox.filter(x=>x.id!==i.id);await persist();renderInbox()},'danger')
+ );
+ tr.append(td);tb.append(tr);
+ }if(!items.length)empty(tb,6);
+}
+$('filterNature').addEventListener('change',renderInbox);$('filterReview').addEventListener('change',renderInbox);
+$('filterPendingOfficial').addEventListener('click',()=>{$('filterNature').value='official';$('filterReview').value='pending';renderInbox()});$('filterUnreviewed').addEventListener('click',()=>{$('filterNature').value='all';$('filterReview').value='pending';renderInbox()});
+$('addSampleMail').addEventListener('click',async()=>{const p=db.cases[0];const number=p?.number||'0000000-00.2026.8.26.0000';await ingest([{source:'Gmail (demonstração)',subject:'Exemplo fictício de publicação — '+number,from:'teste@example.invalid',messageId:'',date:new Date().toISOString().slice(0,10),body:'DEMONSTRAÇÃO: intimação fictícia no processo '+number+'. Nenhum prazo jurídico foi calculado.'}])});
+const previousRender=render;render=function(){previousRender();renderInbox()};
+
+/* Leitura assistida local: trechos do próprio documento, sem serviço externo. */
+function simplePublicationText(text){
+ return text
+ .replace(/\bhomologou o acordo\b/gi,'aprovou formalmente o acordo')
+ .replace(/\bse manifestar\b/gi,'apresentar uma resposta')
+ .replace(/\besclarecimentos periciais\b/gi,'explicações do perito')
+ .replace(/\bcontrarrazões\b/gi,'resposta ao recurso')
+ .replace(/\bsob pena de preclusão\b/gi,'com risco de perder a oportunidade de praticar esse ato')
+ .replace(/\bo feito\b/gi,'o processo');
+}
+function publicationReading(item){
+ const body=String(item.body||'').replace(/\r\n?/g,'\n');
+ const paragraphs=body.split(/\n\s*\n|\n(?=\s*(?:[•●]|\d+[.)]\s))/).map(s=>s.replace(/\s+/g,' ').trim()).filter(Boolean);
+ const sentences=paragraphs.flatMap(p=>p.split(/(?<=[.!?;])\s+(?=[A-ZÀ-Ý])/u)).filter(Boolean);
+ const events=sentences.filter(s=>/homolog|julg|defer|indefer|design|senten[cç]a|ac[oó]rd[aã]o|determin|intim|esclarecimento|laudo|recurso|movimenta[cç][aã]o|suspens|sobrest|extin[cç][aã]o|extint/i.test(s));
+ const requests=sentences.filter(s=>/\b(?:deve|dever[aá]|dever[aã]o|manifestar|manifeste|manifestem|apresentar|apresente|apresentem|informar|informe|informem|juntar|junte|juntem|comprovar|comprove|comprovem|pagar|pague|paguem|recolher|recolha|recolham|cumprir|cumpra|cumpram|comparecer|compare[cç]a|esclarecer|esclare[cç]a|regularizar|regularize|liberar|libere|restituir|restitua)(?![a-zà-ÿ])|intim(?:e|em|ou|a[cç][aã]o)|determin(?:o|a|ou|ado|ada)/i.test(s));
+ const deadlines=sentences.filter(s=>/\bprazo\b|\b(?:\d+(?:\s*\([^)]{1,30}\))?|um|dois|tr[eê]s|quatro|cinco|seis|sete|oito|nove|dez|quinze|vinte|trinta|quarenta|sessenta|noventa)\s+(?:dias?|horas?|meses)\b|\bat[eé]\s+(?:o\s+dia\s+)?\d{1,2}[/.\-]\d{1,2}(?:[/.\-]\d{2,4})?/i.test(s));
+ const terms=[
+ [/homolog/i,'Homologação','Aprovação formal de um ato ou acordo.'],
+ [/esclarecimento.*perici|perici.*esclarecimento/i,'Esclarecimentos periciais','Explicações sobre o trabalho do perito.'],
+ [/manifest/i,'Manifestar-se','Apresentar uma resposta ou posição no processo.'],
+ [/contrarraz/i,'Contrarrazões','Resposta ao recurso apresentado pela outra parte.'],
+ [/sobrest/i,'Sobrestamento','Pausa no andamento do processo.'],
+ [/preclus/i,'Preclusão','Perda da oportunidade de praticar um ato processual.'],
+ [/exequente/i,'Exequente','Parte que pede o cumprimento da obrigação na execução.'],
+ [/executad/i,'Executado','Parte de quem se exige o cumprimento da obrigação na execução.'],
+ [/reclamante/i,'Reclamante','Parte que iniciou a reclamação trabalhista.'],
+ [/reclamad[ao]/i,'Reclamada ou reclamado','Parte contra quem foi apresentada a reclamação trabalhista.'],
+ [/intim/i,'Intimação','Comunicação para dar ciência de um ato ou pedir uma providência.'],
+ [/sisbajud/i,'SISBAJUD','Sistema usado pelo Judiciário para enviar ordens às instituições financeiras.']
+ ].filter(([pattern])=>pattern.test(body)).map(([,term,meaning])=>({term,meaning}));
+ return {body,events:[...new Set(events)],requests:[...new Set(requests)],deadlines:[...new Set(deadlines)],terms,numbers:[...new Set((body+' '+(item.subject||'')).match(/\b\d{7}-\d{2}\.\d{4}\.\d\.\d{2}\.\d{4}\b/g)||[])]};
+}
+function openPublicationReading(item,originalOpen=false){
+ const reading=publicationReading(item),dialog=$('publicationReading'),content=$('publicationReadingContent');content.replaceChildren();
+ $('publicationReadingTitle').textContent=item.subject||'Resumo da publicação';
+ const process=db.cases.find(c=>c.id===item.caseId);
+ content.append(el('p','Processo: '+(process?.number||reading.numbers.join(', ')||'Não identificado no texto')));
+ content.append(el('p',[item.source,item.date,item.account?'Conta: '+item.account:''].filter(Boolean).join(' · ')));
+ const note=el('p','Leitura assistida local: seleciona trechos e explica termos. Não usa IA e pode deixar informações de fora. Confira o original antes de agir.');note.className='muted';content.append(note);
+ function excerpts(title,entries,fallback,simplify=false){const section=el('section');section.className='reading-section';section.append(el('h3',title));if(!entries.length)section.append(el('p',fallback));else{const list=el('ul');for(const text of entries.slice(0,8)){const li=el('li'),simple=simplify?simplePublicationText(text):text;li.append(el('p',simple));if(simple!==text){const source=el('details');source.append(el('summary','Conferir trecho original'),el('p',text));li.append(source)}list.append(li)}section.append(list);if(entries.length>8)section.append(el('p','Há mais '+(entries.length-8)+' trecho(s) relacionado(s). Veja o texto original completo abaixo.'))}content.append(section)}
+ excerpts('O que aconteceu',reading.events,'Não foi possível identificar o acontecimento com segurança pelas palavras do texto. Leia o original abaixo.',true);
+ excerpts('O que foi determinado ou solicitado',reading.requests,'Não foi identificada uma providência pelas palavras do texto. Isso não significa que não haja algo a fazer; confira o original.',true);
+ excerpts('Prazo mencionado — com o contexto original',reading.deadlines,'Não foi localizado um prazo explícito pelas palavras do texto. Confira o original; não foi calculado nem presumido nenhum prazo.');
+ const caution=el('p','As frases acima mantêm condições, partes e negações do texto. Menção a prazo, suspensão ou data não define vencimento nem confirma que a obrigação é do seu cliente.');caution.className='muted';content.append(caution);
+ if(reading.terms.length){const terms=el('section');terms.className='reading-section';terms.append(el('h3','Em linguagem simples'));const list=el('dl');for(const {term,meaning} of reading.terms)list.append(el('dt',term),el('dd',meaning));terms.append(list);content.append(terms)}
+ if(item.notes){const notes=el('section');notes.className='reading-section';notes.append(el('h3','Anotações do cadastro'),el('p',item.notes));content.append(notes)}
+ const details=el('details');details.id='publicationOriginal';details.open=originalOpen;details.append(el('summary','Texto original disponível no aplicativo'));
+ const original=el('pre',reading.body||'Sem conteúdo de texto disponível.');original.id='publicationOriginalText';details.append(original);content.append(details);
+ if(item.gmailId){const link=el('a','Abrir mensagem original no Gmail');link.href='https://mail.google.com/mail/?authuser='+encodeURIComponent(item.account||'')+'#all/'+encodeURIComponent(item.gmailId);link.target='_blank';link.rel='noopener noreferrer';content.append(link)}
+ $('publicationReadingClose').onclick=()=>dialog.close();if(!dialog.open)dialog.showModal();
+}
+
+function resetPub(){ $('pubForm').reset();$('pubId').value='';$('pubFormTitle').textContent='Nova intimação manual';$('pubHint').textContent='O sistema poderá localizar um número CNJ no texto e sugerir o processo cadastrado. Você deverá confirmar.'; }
+function renderPublications(){
+ const sel=$('pubCase'),previous=sel.value;sel.replaceChildren(el('option','Selecione um processo cadastrado'));sel.firstChild.value='';
+ for(const p of db.cases){const o=el('option',p.number+' — '+(db.clients.find(c=>c.id===p.clientId)?.name||''));o.value=p.id;sel.append(o)}sel.value=previous;
+ const tb=$('pubRows');tb.replaceChildren();const q=$('pubSearch').value.toLocaleLowerCase('pt-BR');const results=db.publications.slice().sort((a,b)=>b.date.localeCompare(a.date)).filter(x=>(x.source+' '+x.type+' '+x.body+' '+(db.cases.find(p=>p.id===x.caseId)?.number||'')).toLocaleLowerCase('pt-BR').includes(q));
+ for(const item of results){const tr=el('tr');const cas=db.cases.find(p=>p.id===item.caseId);tr.append(el('td',item.date.split('-').reverse().join('/')+' · '+item.source),el('td',cas?.number||'Não identificado'),el('td',item.type+' · '+item.status),el('td',item.deadline?item.deadline.split('-').reverse().join('/')+' (manual)':'Não informado'));const cell=el('td');cell.append(action('Resumo',()=>openPublicationReading(item)),action('Visualizar',()=>openPublicationReading(item,true)),action('Editar',()=>editPub(item)),action('Excluir',()=>deletePub(item),'danger'));tr.append(cell);tb.append(tr)}if(!results.length)empty(tb,5);
+}
+function editPub(item){show('intimacoes');$('pubId').value=item.id;$('pubCase').value=item.caseId;$('pubSource').value=item.source;$('pubDate').value=item.date;$('pubType').value=item.type;$('pubStatus').value=item.status;$('pubDeadline').value=item.deadline||'';$('pubBody').value=item.body;$('pubNotes').value=item.notes||'';$('pubFormTitle').textContent='Editar intimação fictícia';window.scrollTo(0,0)}
+async function deletePub(item){if(!confirm('Excluir esta intimação fictícia?'))return;db.publications=db.publications.filter(x=>x.id!==item.id);await persist();render();notice('Intimação excluída')}
+$('pubForm').addEventListener('submit',async e=>{e.preventDefault();const id=$('pubId').value,caseId=$('pubCase').value;if(!db.cases.some(c=>c.id===caseId)){notice('Selecione um processo cadastrado');return}const o={id:id||uuid(),caseId,source:$('pubSource').value,date:$('pubDate').value,type:$('pubType').value,status:$('pubStatus').value,deadline:$('pubDeadline').value,body:$('pubBody').value.trim(),notes:$('pubNotes').value.trim()};if(!o.body||!o.date){notice('Informe data e texto');return}if(id)db.publications=db.publications.map(x=>x.id===id?o:x);else db.publications.push(o);try{await persist();resetPub();render();notice('Intimação salva')}catch(err){notice('Não foi possível gravar. Faça backup e verifique o espaço do navegador.')}});
+$('clearPub').addEventListener('click',resetPub);$('pubSearch').addEventListener('input',renderPublications);
+$('detectPub').addEventListener('click',()=>{const matches=($('pubBody').value.match(/\b\d{7}-\d{2}\.\d{4}\.\d\.\d{2}\.\d{4}\b/g)||[]);const processes=db.cases.filter(p=>matches.includes(p.number));if(processes.length===1){$('pubHint').textContent='Sugestão: '+processes[0].number+'. Confira e selecione manualmente, se correto.'; $('pubCase').value=processes[0].id;}else if(processes.length>1){$('pubHint').textContent='Encontrados vários números cadastrados. Escolha o correto no campo Processo.';}else{$('pubHint').textContent='Nenhum processo cadastrado foi identificado no texto. Selecione manualmente.'}});
+
+
+// Gmail API read-only OAuth browser-only. Requires trusted HTTPS origin and Google OAuth client ID.
+let gmailToken='',gmailTimer=null,gmailClient=null,gmailTokenExpiry=0,gmailInProgress=false,gmailSession=0,gmailAccount='',gmailQuotaUntil=0;
+function gmailStatus(s){$('gmailStatus').textContent=s}
+function gmailButtons(connected){$('gmailFetch').disabled=!connected;$('gmailDisconnect').disabled=!connected}
+function loadGoogleIdentity(){return new Promise((resolve,reject)=>{if(window.google?.accounts?.oauth2){resolve();return}const found=document.querySelector('script[data-avm-gis]');if(found){found.addEventListener('load',resolve,{once:true});found.addEventListener('error',()=>reject(Error('Falha no carregamento do Google')),{once:true});return}const tag=document.createElement('script');tag.dataset.avmGis='1';tag.src='https://accounts.google.com/gsi/client';tag.async=true;tag.onload=resolve;tag.onerror=()=>reject(Error('Não foi possível carregar o login do Google.'));document.head.append(tag)})}
+function gmailReset(){++gmailSession;gmailAccount='';gmailToken='';gmailTokenExpiry=0;if(gmailTimer){clearInterval(gmailTimer);gmailTimer=null}gmailButtons(false);gmailStatus('Desconectado — nenhuma consulta automática ativa.');}
+function safeDecodeGmail(data){try{const normalized=data.replace(/-/g,'+').replace(/_/g,'/');const raw=atob(normalized.padEnd(Math.ceil(normalized.length/4)*4,'='));return new TextDecoder().decode(Uint8Array.from(raw,c=>c.charCodeAt(0)))}catch{return ''}}
+function bodyFromPayload(payload){const plain=[],html=[];function visit(p){if(!p)return;if(p.body?.data){const text=safeDecodeGmail(p.body.data);if(p.mimeType==='text/plain')plain.push(text);else if(p.mimeType==='text/html')html.push(text)}for(const part of p.parts||[])visit(part)}visit(payload);if(plain.length)return plain.join('\n');return html.map(text=>{const doc=new DOMParser().parseFromString(text,'text/html');doc.querySelectorAll('script,style,iframe').forEach(n=>n.remove());return doc.body?.textContent||''}).join('\n')}
+async function googleGet(endpoint,expected=gmailSession){const access=gmailToken;const res=await fetch('https://gmail.googleapis.com/gmail/v1/users/me/'+endpoint,{headers:{Authorization:'Bearer '+access},cache:'no-store'});if(expected!==gmailSession)throw Error('Conexão encerrada ou conta alterada.');if(res.status===401){gmailReset();const expired=Error('Autorização expirou. Conecte o Gmail novamente.');expired.gmailExpired=true;throw expired}if(!res.ok){let detail='';try{detail=(await res.json()).error?.message||''}catch{}throw Error('Erro do Gmail ('+res.status+'): '+detail)}const value=await res.json();if(expected!==gmailSession)throw Error('Conexão encerrada ou conta alterada.');return value}
+async function fetchGmailJudicial(){
+ if(gmailInProgress||registryImportRunning)return;
+ if(Date.now()<gmailQuotaUntil){gmailStatus('Limite temporário da API Gmail. Aguarde até '+new Date(gmailQuotaUntil).toLocaleTimeString('pt-BR')+' para tentar novamente. Os registros já gravados foram preservados.');return}
+ if(!gmailToken){gmailStatus('Conecte o Gmail primeiro.');return}
+ if(Date.now()>gmailTokenExpiry-10000){gmailReset();gmailStatus('Sessão do Google expirada; clique em Conectar Gmail novamente.');return}
+ const active=gmailSession;gmailInProgress=true;$('gmailFetch').disabled=true;
+ let pages=0,examined=0,known=0,added=0,duplicates=0,pending=[],storageFailed=false;
+ const seenMessages=new Set(),seenPages=new Set();
+ const summary=()=>pages+' página(s), '+examined+' e-mail(s) examinado(s), '+known+' já importado(s), '+added+' comunicação(ões) nova(s) gravada(s) e '+duplicates+' duplicada(s) ignorada(s)';
+ const flush=async()=>{if(!pending.length)return;if(active!==gmailSession||!password)throw Error('Conexão encerrada; os lotes anteriores permanecem gravados.');try{const result=await ingest(pending);added+=result.added;duplicates+=result.duplicates;pending=[]}catch(err){storageFailed=true;throw err}};
+ gmailStatus('Consultando todas as páginas do filtro dos últimos 15 dias…');
+ try{
+ const get=endpoint=>googleGet(endpoint,active);const profile=await get('profile');if(!profile.emailAddress)throw Error('Não foi possível identificar a conta.');gmailAccount=profile.emailAddress.trim().toLowerCase();
+ const query='newer_than:15d -in:spam -in:trash {"Recorte Digital" "Atualizações de Informações Processuais" "acompanhamento e atualizações" "[PUSH]" "Portal e-Saj" "Movimentações Processuais" "intimação" "publicação" "DJEN" "TRF3" "TRT02" "TRT-2" "TRF-3" "TJSP" "PJe" "eproc"}';
+ let pageToken='';
+ do{
+ if(active!==gmailSession||!password)return;
+ if(seenPages.has(pageToken))throw Error('O Gmail repetiu uma página. Consulta interrompida para evitar repetição.');seenPages.add(pageToken);
+ const params=new URLSearchParams({q:query,maxResults:'30'});if(pageToken)params.set('pageToken',pageToken);
+ gmailStatus('Conta '+gmailAccount+' · Consultando página '+(pages+1)+'… '+summary()+'.');
+ const listing=await get('messages?'+params.toString());pages++;
+ for(const m of listing.messages||[]){
+ if(active!==gmailSession||!password)return;
+ if(seenMessages.has(m.id))continue;seenMessages.add(m.id);
+ if(imported().some(i=>i.gmailId===m.id&&String(i.account||'').toLowerCase()===gmailAccount)){examined++;known++;continue}
+ await new Promise(resolve=>setTimeout(resolve,250));
+ if(active!==gmailSession||!password)return;
+ const mail=await get('messages/'+encodeURIComponent(m.id)+'?format=full'),headers=mail.payload?.headers||[];
+ const field=n=>headers.find(x=>x.name.toLowerCase()===n)?.value||'';
+ pending.push({account:gmailAccount,gmailId:m.id,source:'Gmail (API oficial)',subject:field('subject'),from:field('from'),messageId:'gmail:'+gmailAccount+':'+m.id,date:new Date(Number(mail.internalDate||Date.now())).toISOString().slice(0,10),body:bodyFromPayload(mail.payload).slice(0,50000)});examined++;
+ if(pending.length>=10)await flush();
+ gmailStatus('Conta '+gmailAccount+' · Recebendo página '+pages+'… '+summary()+'.');
+ }
+ await flush();pageToken=listing.nextPageToken||'';
+ }while(pageToken);
+ if(active!==gmailSession||!password)return;
+ gmailStatus('Conta '+gmailAccount+'. Consulta concluída: '+summary()+'. Todas as páginas retornadas pelo Gmail para este filtro dos últimos 15 dias foram percorridas. O filtro pode deixar avisos de fora; confira também o Gmail e as fontes oficiais.');
+ }catch(err){
+ if(active===gmailSession&&password){
+ let saveWarning='';if(pending.length&&!storageFailed){try{await flush()}catch(saveError){saveWarning=' Não foi possível gravar o último lote.'}}
+ const unsaved=pending.length?' '+pending.length+' e-mail(s) lido(s) ainda não gravado(s); serão buscados novamente.':'';
+ const quota=/\b(403|429)\b|quota exceeded|rate limit/i.test(err.message);if(quota)gmailQuotaUntil=Date.now()+120000;
+ gmailStatus('Consulta incompleta: '+summary()+'. Os registros já gravados foram preservados.'+unsaved+saveWarning+' '+(quota?'Limite temporário do Gmail; aguarde 2 minutos e use Consultar agora.':'Use Consultar agora para tentar novamente; os já importados serão ignorados.')+' Detalhe: '+err.message);
+ }else if(err.gmailExpired&&password&&!gmailToken){gmailStatus('Consulta incompleta: '+summary()+'. Os registros já gravados foram preservados. A autorização expirou; conecte o Gmail novamente para buscar o restante.');}
+ }finally{gmailInProgress=false;$('gmailFetch').disabled=!gmailToken}
+}
+$('gmailConnect').addEventListener('click',async()=>{
+ const clientId=$('gmailClientId').value.trim();if(!/^\d+-[a-z0-9-]+\.apps\.googleusercontent\.com$/i.test(clientId)){gmailStatus('Informe um ID de cliente OAuth válido criado no Google Cloud (tipo Aplicativo Web).');return}
+ if(location.protocol!=='https:' && location.hostname!=='localhost'){gmailStatus('A autenticação OAuth do Google exige uma origem HTTPS autorizada. O arquivo file:// da pasta Downloads não pode conectar diretamente.');return}
+ try{await loadGoogleIdentity();gmailClient=google.accounts.oauth2.initTokenClient({client_id:clientId,scope:'https://www.googleapis.com/auth/gmail.readonly',callback:async response=>{if(response.error){gmailStatus('Autorização recusada: '+response.error);return}if(!password)return;if(!response.access_token||!google.accounts.oauth2.hasGrantedAllScopes(response,'https://www.googleapis.com/auth/gmail.readonly')){gmailStatus('Permissão de leitura do Gmail não concedida.');return}++gmailSession;gmailToken=response.access_token;gmailTokenExpiry=Date.now()+Number(response.expires_in||3500)*1000;gmailButtons(true);gmailStatus('Gmail autorizado nesta sessão. Consultando agora…');if(gmailTimer)clearInterval(gmailTimer);gmailTimer=setInterval(()=>{if(!document.hidden&&gmailToken)fetchGmailJudicial()},30*60*1000);await fetchGmailJudicial()}});gmailClient.requestAccessToken({prompt:'consent'})}catch(e){gmailStatus('Falha ao iniciar login do Google: '+e.message)}
+});
+$('gmailFetch').addEventListener('click',fetchGmailJudicial);
+$('gmailDisconnect').addEventListener('click',()=>{if(gmailToken&&window.google?.accounts?.oauth2?.revoke)google.accounts.oauth2.revoke(gmailToken,()=>{});gmailReset()});
+
+authUI();
+
+// AVM 1.7: relatório adicional, sem alterar a chave, a criptografia ou o formato do backup 1.6.
+function agendaProcessLabel(caseId){const process=db.cases.find(p=>p.id===caseId);if(!process)return caseId?'Processo indisponível · Cliente indisponível':'Sem processo vinculado';const client=db.clients.find(c=>c.id===process.clientId);return process.number+' · Cliente: '+(client?.name||'Cliente indisponível')}
+function renderLocalDashboard(){
+ const target=$('nextEvents');if(!target)return;target.replaceChildren();
+ const now=new Date();const today=[now.getFullYear(),String(now.getMonth()+1).padStart(2,'0'),String(now.getDate()).padStart(2,'0')].join('-');
+ const upcoming=(db.events||[]).filter(e=>e.date&&e.date>=today&&e.status!=='Concluído').sort((a,b)=>(a.date+' '+(a.time||'')).localeCompare(b.date+' '+(b.time||''))).slice(0,8);
+ for(const evt of upcoming){const tr=el('tr');const cas=(db.cases||[]).find(c=>c.id===evt.caseId);tr.append(el('td',evt.date.split('-').reverse().join('/')+(evt.time?' '+evt.time:'')),el('td',evt.title+' · '+evt.type),el('td',agendaProcessLabel(evt.caseId)));target.append(tr)}
+ if(!upcoming.length){const tr=el('tr'),td=el('td','Nenhum compromisso futuro cadastrado.');td.colSpan=3;tr.append(td);target.append(tr)}
+ const pending=(db.inbox||[]).filter(x=>!x.reviewed).length;
+ const line=$('dashboardInbox');if(line)line.textContent=pending+' comunicação(ões) importada(s) ainda não marcada(s) como revisada(s). Verifique a natureza e os prazos diretamente no tribunal.';
+}
+function csvSafe(v){let text=String(v??'');if(/^[\s]*[=+\-@]/.test(text))text="'"+text;return '"'+text.replaceAll('"','""')+'"'}
+function exportCsv(kind){
+ let cols,rows;
+ if(kind==='clientes'){cols=['Nome','Telefone','CPF/CNPJ','E-mail','Endereço'];rows=db.clients.map(c=>[c.name,c.phone,c.doc,c.email,c.address])}
+ else if(kind==='processos'){cols=['Número CNJ','Cliente','Área','Tribunal','Unidade','Fase','Situação'];rows=db.cases.map(c=>[c.number,db.clients.find(x=>x.id===c.clientId)?.name||'',c.area,c.court,c.unit,c.phase,c.status])}
+ else {cols=['Data','Horário','Compromisso','Tipo','Processo','Situação'];rows=db.events.map(e=>[e.date,e.time,e.title,e.type,db.cases.find(x=>x.id===e.caseId)?.number||'',e.status])}
+ const txt='\uFEFF'+[cols,...rows].map(r=>r.map(csvSafe).join(';')).join('\r\n');
+ const link=document.createElement('a'),url=URL.createObjectURL(new Blob([txt],{type:'text/csv;charset=utf-8'}));link.href=url;link.download='AVM_'+kind+'_'+new Date().toISOString().slice(0,10)+'.csv';link.click();setTimeout(()=>URL.revokeObjectURL(url),2000);notice('Relatório CSV gerado. Atenção: o CSV não é criptografado.');
+}
+$('csvClients').addEventListener('click',()=>exportCsv('clientes'));
+$('csvCases').addEventListener('click',()=>exportCsv('processos'));
+$('csvEvents').addEventListener('click',()=>exportCsv('agenda'));
+$('openInboxDashboard').addEventListener('click',()=>show('intimacoes'));
+
+
+
+let registryImportRunning=false;
+let registryInput=null;
+
+function planRegistryImport(input){
+ const clients=db.clients.slice();
+ const cases=db.cases.slice();
+ const clientByName=new Map();
+ const caseIndices=new Map(cases.map((item,index)=>[cnjFormat(item.number),index]));
+ const inputNumbers=new Set();
+ const areas=new Set(Array.from($('caseArea').children,option=>option.value));
+ const counts={clientsCreated:0,casesCreated:0,casesCompleted:0,casesUnchanged:0,conflicts:0};
+
+ for(const client of clients){
+  const key=normalizeMatch(client.name);
+  clientByName.set(key,clientByName.has(key)?null:client.id);
+ }
+ for(const item of input.clients){
+  const name=typeof item?.name==='string'?item.name.trim():'';
+  const key=normalizeMatch(name);
+  if(!key||name.length>140)throw Error('Há um nome de cliente inválido no arquivo.');
+  if(clientByName.has(key))continue;
+  const id=uuid();
+  clients.push({id,name,phone:'',notes:'',doc:'',email:'',address:'',whatsapp:''});
+  clientByName.set(key,id);
+  counts.clientsCreated++;
+ }
+
+ for(const item of input.cases){
+  const number=typeof item?.number==='string'?cnjFormat(item.number):'';
+  if(!/^\d{7}-\d{2}\.\d{4}\.\d\.\d{2}\.\d{4}$/.test(number)||inputNumbers.has(number)){
+   throw Error('O arquivo contém número CNJ inválido ou repetido.');
+  }
+  inputNumbers.add(number);
+  const checkDigits=number.replace(/\D/g,'');
+  if(BigInt(checkDigits.slice(0,7)+checkDigits.slice(9)+checkDigits.slice(7,9))%97n!==1n){
+   throw Error('O arquivo contém CNJ com dígito verificador inválido.');
+  }
+  if(!areas.has(item.area))throw Error('O arquivo contém uma área processual inválida.');
+  const details={area:item.area};
+  for(const [field,limit] of [['court',90],['unit',140],['parties',220]]){
+   const text=item[field]??'';
+   if(typeof text!=='string'||text.trim().length>limit)throw Error('O arquivo contém campo processual inválido.');
+   details[field]=text.trim();
+  }
+
+  const clientId=clientByName.get(normalizeMatch(item.clientName));
+  const index=caseIndices.get(number);
+  const existing=index===undefined?null:cases[index];
+  if(!clientId||(existing&&existing.clientId!==clientId)){
+   counts.conflicts++;
+   continue;
+  }
+  if(!existing){
+   cases.push({id:uuid(),number,clientId,...details,status:'A conferir',phase:'',notes:''});
+   counts.casesCreated++;
+   continue;
+  }
+  const missing=Object.entries(details).filter(([field,value])=>value&&!String(existing[field]??'').trim());
+  if(missing.length){
+   cases[index]={...existing,...Object.fromEntries(missing)};
+   counts.casesCompleted++;
+  }else counts.casesUnchanged++;
+ }
+ return {data:{...db,clients,cases},counts};
+}
+
+function registryImportSummary(counts){
+ return counts.clientsCreated+' cliente(s) novo(s), '+counts.casesCreated+' processo(s) novo(s), '+
+  counts.casesCompleted+' processo(s) complementado(s), '+counts.casesUnchanged+
+  ' processo(s) já cadastrado(s) e '+counts.conflicts+' processo(s) com vínculo para conferir.';
+}
+
+$('registryFile').addEventListener('change',async ()=>{
+ const field=$('registryFile');
+ const file=field.files[0];
+ const status=$('registryStatus');
+ const save=$('registrySave');
+ registryInput=null;
+ status.textContent='';
+ save.disabled=true;
+ if(!file)return;
+ try{
+  if(file.size>2000000)throw Error('Escolha um arquivo de cadastros de até 2 MB.');
+  const input=JSON.parse(await file.text());
+  if(field.files[0]!==file||!password)return;
+  if(input?.format!=='AVM-CADASTROS'||input.version!==1||
+     !Array.isArray(input.clients)||!Array.isArray(input.cases)){
+   throw Error('O arquivo não está no formato de cadastros AVM.');
+  }
+  const {counts}=planRegistryImport(input);
+  status.textContent='Prévia: '+registryImportSummary(counts);
+  registryInput=input;
+  save.disabled=!(counts.clientsCreated||counts.casesCreated||counts.casesCompleted);
+ }catch(err){
+  if(field.files[0]===file)status.textContent='Falha na leitura. '+err.message;
+ }
+});
+
+$('registrySave').addEventListener('click',async ()=>{
+ const status=$('registryStatus');
+ if(!registryInput||!password||registryImportRunning)return;
+ if(gmailInProgress){
+  status.textContent='Aguarde a consulta do Gmail terminar e clique em Gravar cadastros novamente.';
+  return;
+ }
+ registryImportRunning=true;
+ $('app').inert=true;
+ $('lock').disabled=true;
+ $('registrySave').disabled=true;
+ status.textContent='Gravando e conferindo o cofre…';
+ let result;
+ try{
+  result=planRegistryImport(registryInput);
+  await persist(result.data,JSON.stringify(vault));
+  db=result.data;
+ }catch(err){
+  status.textContent='Os cadastros não foram importados. '+err.message;
+  $('registrySave').disabled=false;
+  return;
+ }finally{
+  $('app').inert=false;
+  $('lock').disabled=false;
+  registryImportRunning=false;
+ }
+ registryInput=null;
+ $('registryFile').value='';
+ render();
+ status.textContent='Cadastros gravados no cofre: '+registryImportSummary(result.counts);
+});
+
+// Prazos de comunicações: campos adicionais opcionais mantêm backups antigos compatíveis.
+let deadlineCommunicationId='',deadlineSaving=false;
+function deadlineSuggestions(i){
+ const text=normalizeMatch((i.subject||'')+' '+(i.body||'')),tasks=[];
+ const cls=classifyNotice(i);
+ if(cls.hearingInfo){
+  const h=cls.hearingInfo;
+  tasks.push((h.kind||'Audiência')+(h.dateBR?' em '+h.dateBR:'')+(h.time?' às '+h.time:'')+' — conferir nos autos.');
+ }
+ if(/provas? ora(?:is|l)/.test(text)&&/especific|pretend|interess/.test(text))tasks.push('Especificar se pretende produzir provas orais, sob pena de encerramento da instrução.');
+ if(/esclarecimento/.test(text)&&/perit|perici/.test(text)&&/manifest/.test(text))tasks.push('Manifestar-se sobre os esclarecimentos do perito.');
+ if(/laudo pericial/.test(text)&&/manifest/.test(text))tasks.push('Manifestar-se sobre o laudo pericial.');
+ if(/contesta/.test(text)&&/manifest|replic/.test(text))tasks.push('Apresentar réplica / manifestação sobre a contestação.');
+ if(/comprovante de resid/.test(text))tasks.push('Apresentar comprovante de residência atualizado e legível.');
+ if(/oficio.? requisit|requisitorio|rpv|precatorio/.test(text)&&/confer|manifest/.test(text))tasks.push('Conferir preenchimento do ofício requisitório / RPV / precatório.');
+ if(/rol de testemunh|arrolar testemunh/.test(text))tasks.push('Conferir necessidade de rol de testemunhas e ciência da parte.');
+ if(/endereco atualizado|ar negativ|devolucao negativ/.test(text))tasks.push('Informar endereço atualizado da parte requerida nos autos.');
+ if(/contrarraz/.test(text))tasks.push('Apresentar contrarrazões ao recurso.');
+ if(/emend/.test(text)&&/inicial/.test(text))tasks.push('Emendar a petição inicial conforme despacho.');
+ return [...new Set(tasks)].slice(0,10).map(t=>t.slice(0,140)).join('\n');
+}
+function clearDeadlineReview(){deadlineCommunicationId='';$('deadlineForm').reset();$('deadlineOriginal').textContent='';$('deadlineSource').textContent='';$('deadlineExisting').replaceChildren();$('deadlineStatus').textContent='';}
+function openCommunicationDeadline(i){
+ clearDeadlineReview();deadlineCommunicationId=i.id;
+ const cls=classifyNotice(i);
+ $('deadlineSource').textContent=(i.subject||'Comunicação sem título')+' · '+(i.date||'Sem data')+(i.reviewed?' · Conferida':' · Pendente')+(cls.deadlineText?' · '+cls.deadlineText:'');
+ $('deadlineOriginal').textContent=i.body||'';
+ const select=$('deadlineCase');select.replaceChildren(el('option','Selecione o processo'));select.firstChild.value='';
+ for(const p of db.cases){const o=el('option',p.number+' · '+(db.clients.find(c=>c.id===p.clientId)?.name||''));o.value=p.id;select.append(o)}select.value=i.caseId||'';
+ const existing=db.events.filter(e=>e.communicationId===i.id);
+ $('deadlineForm').classList.toggle('hidden',!!existing.length);
+ if(existing.length){$('deadlineExisting').append(el('p','Esta comunicação já possui '+existing.length+' registro(s) na agenda. Edite os registros existentes.'));
+ for(const e of existing){$('deadlineExisting').append(el('p',e.type+' · '+e.title+' · '+e.date.split('-').reverse().join('/')+(e.time?' às '+e.time:'')+' · '+e.status),action('Editar na agenda',()=>{$('deadlineDialog').close();editEvent(e)}));}}
+ else{
+  $('deadlineTasks').value=deadlineSuggestions(i);const baseD=(i.date&&/^\d{4}-\d{2}-\d{2}/.test(i.date))?i.date.slice(0,10):new Date().toISOString().slice(0,10);if($('dlgCalcBase'))$('dlgCalcBase').value=baseD;
+  if(cls.hearingInfo){
+   $('deadlineType').value='Audiência';
+   $('deadlineDate').value=cls.hearingInfo.dateISO||'';
+   $('deadlineTime').value=cls.hearingInfo.time||'';
+  }else{
+   $('deadlineType').value='Prazo';
+   $('deadlineDate').value='';
+   $('deadlineTime').value='';
+  }
+ }
+ $('deadlineDialog').showModal();
+}
+$('deadlineClose').addEventListener('click',()=>{$('deadlineDialog').close()});
+$('deadlineDialog').addEventListener('close',clearDeadlineReview);
+$('deadlineForm').addEventListener('submit',async ev=>{
+ ev.preventDefault();if(deadlineSaving)return;
+ const i=imported().find(x=>x.id===deadlineCommunicationId),caseId=$('deadlineCase').value,date=$('deadlineDate').value,type=$('deadlineType').value||'Prazo',time=$('deadlineTime').value||'';
+ const tasks=$('deadlineTasks').value.split(/\r?\n/).map(t=>t.trim()).filter(Boolean);
+ const fail=message=>{$('deadlineStatus').textContent=message;$('deadlineStatus').className='error'};
+ if(!i||!db.cases.some(p=>p.id===caseId))return fail('Selecione um processo cadastrado.');
+ if(db.events.some(e=>e.communicationId===i.id))return fail('Já existem registros desta comunicação. Feche e abra Ver prazos criados.');
+ if(!tasks.length||tasks.length>10||tasks.some(t=>t.length>140))return fail('Informe de 1 a 10 providências, com até 140 caracteres por linha.');
+ if(new Set(tasks.map(normalizeMatch)).size!==tasks.length)return fail('Há providências repetidas. Revise as linhas.');
+ if(!/^\d{4}-\d{2}-\d{2}$/.test(date)||!Number.isFinite(Date.parse(date+'T12:00:00Z'))||!$('deadlineConfirm').checked)return fail('Informe e confirme manualmente a data.');
+ const previous=db.events.slice();deadlineSaving=true;$('deadlineSave').disabled=true;
+ const createdAt=new Date().toISOString();
+ db.events=db.events.concat(tasks.map(title=>({id:uuid(),title,type,date,time,caseId,status:'Pendente',notes:'Registro revisado a partir de comunicação importada. Data confirmada manualmente.',communicationId:i.id,communicationSubject:i.subject||'',communicationDate:i.date||'',deadlineConfirmedAt:createdAt})));
+ try{await persist();$('deadlineDialog').close();$('eventSearch').value='';render();show('agenda');$('agendaSaveStatus').textContent=tasks.length+' registro(s) ('+type+') salvo(s) e verificado(s) no cofre.';$('agendaSaveStatus').className='success';notice(type+' salvo na agenda');}
+ catch(err){db.events=previous;fail('Não foi possível confirmar a gravação. Os registros não foram adicionados à agenda; tente novamente.');}
+ finally{deadlineSaving=false;$('deadlineSave').disabled=false;}
+});
+
+// Relatório de Triagem (AVM 2.1)
+let lastTriageReportHtml='';
+function buildTriageReport(){
+ const all=imported().map(i=>({i,c:classifyNotice(i)}));
+ const today=new Date().toLocaleDateString('pt-BR');
+ const counts={official:0,informative:0,other:0,deadlines:0,hearings:0,unlinked:0};
+ all.forEach(({i,c})=>{
+  counts[c.nature]++;
+  if(c.deadlineMention)counts.deadlines++;
+  if(c.hearingInfo)counts.hearings++;
+  if(!i.caseId)counts.unlinked++;
+ });
+ const priority=all.filter(({i,c})=>!i.reviewed&&(c.deadlineMention||c.hearingInfo||c.nature==='official')).sort((a,b)=>(b.i.date||'').localeCompare(a.i.date||''));
+ const box=$('triageReportContent');
+ box.replaceChildren();
+ box.append(el('p','Data da triagem: '+today+' · Uso interno do escritório.'));
+ box.append(el('p','Total registrado: '+all.length+' comunicação(ões) — '+counts.official+' possível(is) publicação(ões) oficial(is), '+counts.informative+' aviso(s) informativo(s), '+counts.other+' outra(s). Menções a prazo: '+counts.deadlines+' · Audiências detectadas: '+counts.hearings+' · Sem processo vinculado: '+counts.unlinked+'.'));
+ const sec1=document.createElement('div');sec1.className='reading-section';
+ sec1.append(el('h3','Providências prioritárias e publicações pendentes ('+priority.length+')'));
+ if(!priority.length){
+  sec1.append(el('p','Nenhuma publicação oficial, prazo ou audiência pendente de conferência.'));
+ }else{
+  const ul=document.createElement('ul');
+  for(const {i,c} of priority){
+   const cas=db.cases.find(x=>x.id===i.caseId);
+   const cli=cas?db.clients.find(x=>x.id===cas.clientId):null;
+   const num=cas?.number||c.numbers[0]||'Sem CNJ';
+   const li=document.createElement('li');
+   const strong=el('strong',num+' · '+c.origin+' · '+(i.date||'Sem data'));
+   const extra=[];
+   if(cli)extra.push('Cliente: '+cli.name);
+   if(c.deadlineMention)extra.push('Prazo detectado: '+c.deadlineText);
+   if(c.hearingInfo)extra.push(c.hearingInfo.kind+(c.hearingInfo.dateBR?' em '+c.hearingInfo.dateBR+(c.hearingInfo.time?' às '+c.hearingInfo.time:''):''));
+   li.append(strong,document.createTextNode(' — '+(i.subject||'Sem assunto')+(extra.length?' ['+extra.join(' | ')+']':'')));
+   ul.append(li);
+  }
+  sec1.append(ul);
+ }
+ box.append(sec1);
+ const note=el('p','Conferência obrigatória: confirme sempre nos autos oficiais o marco inicial, o expediente aplicável e eventual cumprimento antes de lançar vencimentos.');
+ note.className='notice';
+ box.append(note);
+ const esc=s=>String(s||'').replace(/[&<>"]/g,ch=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[ch]));
+ lastTriageReportHtml='<!DOCTYPE html><html lang="pt-BR"><head><meta charset="utf-8"><title>Triagem AVM Simples - '+esc(today)+'</title><style>body{font-family:system-ui,Segoe UI,sans-serif;max-width:840px;margin:28px auto;padding:0 18px;color:#17233a;line-height:1.55}h1{color:#112c4d;border-bottom:2px solid #d6b56d;padding-bottom:8px}h2{color:#17385b;margin-top:22px}li{margin:8px 0}.notice{background:#fff6de;border-left:4px solid #c79d3b;padding:12px;border-radius:5px;margin-top:18px}</style></head><body><h1>Triagem de Intimações — AVM Simples 2.1</h1>'+box.innerHTML+'</body></html>';
+ $('triageReportDialog').showModal();
+}
+$('generateTriageReport')?.addEventListener('click',buildTriageReport);
+$('triageReportClose')?.addEventListener('click',()=>$('triageReportDialog').close());
+$('triageReportPrint')?.addEventListener('click',()=>{
+ const w=window.open('','_blank');
+ if(!w){notice('Permita pop-ups para imprimir ou use Baixar HTML.');return}
+ w.document.write(lastTriageReportHtml);w.document.close();w.focus();w.print();
+});
+$('triageReportDownload')?.addEventListener('click',()=>{
+ const blob=new Blob([lastTriageReportHtml],{type:'text/html;charset=utf-8'});
+ const a=document.createElement('a');
+ a.href=URL.createObjectURL(blob);
+ a.download='Triagem_AVM_Simples_'+new Date().toISOString().slice(0,10)+'.html';
+ a.click();
+ setTimeout(()=>URL.revokeObjectURL(a.href),1000);
+});
+
+
+// === AVM Simples 2.2: Calculadora assistida de prazos (CPC/CLT) + Exportação .ics ===
+function easterSunday(year){
+ const a=year%19,b=Math.floor(year/100),c=year%100,d=Math.floor(b/4),e=b%4,f=Math.floor((b+8)/25),g=Math.floor((b-f+1)/3),h=(19*a+b-d-g+15)%30,i=Math.floor(c/4),k=c%4,l=(32+2*e+2*i-h-k)%7,m=Math.floor((a+11*h+22*l)/451),month=Math.floor((h+l-7*m+114)/31),day=((h+l-7*m+114)%31)+1;
+ return new Date(Date.UTC(year,month-1,day));
+}
+function addUtcDays(dt,n){const r=new Date(dt.getTime());r.setUTCDate(r.getUTCDate()+n);return r;}
+function isoDate(dt){return dt.toISOString().slice(0,10);}
+function brazilHolidays(year){
+ const fixed=['01-01','04-21','05-01','07-09','09-07','10-12','11-02','11-15','11-20','12-25'].map(md=>year+'-'+md);
+ const easter=easterSunday(year);
+ const movable=[-48,-47,-2,60].map(off=>isoDate(addUtcDays(easter,off)));
+ return new Set([...fixed,...movable]);
+}
+function isForensicRecess(dt){
+ const m=dt.getUTCMonth()+1,d=dt.getUTCDate();
+ return (m===12&&d>=20)||(m===1&&d<=20);
+}
+function isNonBusinessDay(dt,includeRecess,holidayCache){
+ const dow=dt.getUTCDay();
+ if(dow===0||dow===6)return true;
+ if(includeRecess&&isForensicRecess(dt))return true;
+ const y=dt.getUTCFullYear();
+ if(!holidayCache.has(y))holidayCache.set(y,brazilHolidays(y));
+ return holidayCache.get(y).has(isoDate(dt));
+}
+function calcBrazilianDeadline(startISO,days,mode='uteis',includeRecess=true){
+ if(!/^\d{4}-\d{2}-\d{2}$/.test(startISO)||!Number.isInteger(days)||days<1)return null;
+ const holidayCache=new Map();
+ let cur=new Date(startISO+'T12:00:00Z');
+ // Art. 224 CPC: exclui o dia do começo, inicia no primeiro dia útil seguinte
+ cur=addUtcDays(cur,1);
+ while(isNonBusinessDay(cur,includeRecess,holidayCache))cur=addUtcDays(cur,1);
+ const startCountISO=isoDate(cur);
+ if(mode==='corridos'){
+  cur=addUtcDays(cur,days-1);
+  while(isNonBusinessDay(cur,includeRecess,holidayCache))cur=addUtcDays(cur,1);
+ }else{
+  let counted=1;
+  while(counted<days){
+   cur=addUtcDays(cur,1);
+   if(!isNonBusinessDay(cur,includeRecess,holidayCache))counted++;
+  }
+ }
+ return {startCountISO,dueISO:isoDate(cur),dueBR:isoDate(cur).split('-').reverse().join('/'),startCountBR:startCountISO.split('-').reverse().join('/')};
+}
+let lastCalcDueISO='';
+$('calcRun')?.addEventListener('click',()=>{
+ const base=$('calcBaseDate').value,days=parseInt($('calcDays').value,10),mode=$('calcMode').value,recess=$('calcRecess').checked;
+ const res=calcBrazilianDeadline(base,days,mode,recess);
+ if(!res){$('calcResult').textContent='Informe a data da publicação e uma quantidade válida de dias.';$('calcResult').className='error';$('calcApply').classList.add('hidden');return;}
+ lastCalcDueISO=res.dueISO;
+ $('calcResult').textContent='Sugestão preliminar: início em '+res.startCountBR+' → vencimento estimado em '+res.dueBR+' ('+days+' dias '+(mode==='uteis'?'úteis':'corridos')+(recess?', considerando recesso 20/12–20/01':'')+'). Confira nos autos.';
+ $('calcResult').className='success';
+ $('calcApply').classList.remove('hidden');
+});
+$('calcApply')?.addEventListener('click',()=>{
+ if(!lastCalcDueISO)return;
+ $('eventDate').value=lastCalcDueISO;
+ $('eventType').value='Prazo';
+ $('eventTitle').focus();
+ notice('Data sugerida preenchida no formulário. Confira nos autos antes de salvar.');
+});
+$('dlgCalcBtn')?.addEventListener('click',()=>{
+ const base=$('dlgCalcBase').value,days=parseInt($('dlgCalcDays').value,10),mode=$('dlgCalcMode').value;
+ const res=calcBrazilianDeadline(base,days,mode,true);
+ if(!res){$('dlgCalcNote').textContent='Informe a data base e os dias para simular.';$('dlgCalcNote').className='error';return;}
+ $('deadlineDate').value=res.dueISO;
+ $('dlgCalcNote').textContent='Sugestão preenchida: início em '+res.startCountBR+' → '+res.dueBR+'. Confira nos autos e marque a caixa abaixo.';
+ $('dlgCalcNote').className='success';
+});
+$('eventTypeFilter')?.addEventListener('change',renderEvents);
+$('eventStatusFilter')?.addEventListener('change',renderEvents);
+
+function icsEscape(s){return String(s||'').replace(/\\/g,'\\\\').replace(/\n/g,'\\n').replace(/,/g,'\\,').replace(/;/g,'\\;');}
+function buildIcsContent(events){
+ const now=new Date().toISOString().replace(/[-:]/g,'').replace(/\.\d+Z$/,'Z');
+ const lines=['BEGIN:VCALENDAR','VERSION:2.0','PRODID:-//AVM Simples 2.2//Agenda Juridica//PT-BR','CALSCALE:GREGORIAN'];
+ for(const e of events){
+  if(!/^\d{4}-\d{2}-\d{2}$/.test(e.date||''))continue;
+  const d=e.date.replace(/-/g,'');
+  lines.push('BEGIN:VEVENT');
+  lines.push('UID:'+(e.id||uuid())+'@avmsimples.local');
+  lines.push('DTSTAMP:'+now);
+  if(e.time&&/^\d{2}:\d{2}$/.test(e.time)){
+   const hhmm=e.time.replace(':','')+'00';
+   const [hh,mm]=e.time.split(':').map(Number);
+   const endH=String(Math.min(23,hh+1)).padStart(2,'0')+String(mm).padStart(2,'0')+'00';
+   lines.push('DTSTART:'+d+'T'+hhmm);
+   lines.push('DTEND:'+d+'T'+endH);
+  }else{
+   const nextDay=isoDate(addUtcDays(new Date(e.date+'T12:00:00Z'),1)).replace(/-/g,'');
+   lines.push('DTSTART;VALUE=DATE:'+d);
+   lines.push('DTEND;VALUE=DATE:'+nextDay);
+  }
+  const proc=agendaProcessLabel(e.caseId);
+  lines.push('SUMMARY:'+icsEscape(e.type+': '+e.title));
+  lines.push('DESCRIPTION:'+icsEscape('Processo/Cliente: '+proc+(e.notes?'\nObservações: '+e.notes:'')));
+  lines.push('STATUS:'+(e.status==='Cancelado'?'CANCELLED':'CONFIRMED'));
+  lines.push('BEGIN:VALARM','ACTION:DISPLAY','DESCRIPTION:Lembrete AVM Simples','TRIGGER:-P1D','END:VALARM');
+  lines.push('END:VEVENT');
+ }
+ lines.push('END:VCALENDAR');
+ return lines.join('\r\n')+'\r\n';
+}
+function exportEventsIcs(events,filename){
+ if(!events.length){notice('Não há compromissos para exportar.');return;}
+ const blob=new Blob([buildIcsContent(events)],{type:'text/calendar;charset=utf-8'});
+ const a=document.createElement('a');
+ a.href=URL.createObjectURL(blob);
+ a.download=filename||('AVM_Simples_Agenda_'+new Date().toISOString().slice(0,10)+'.ics');
+ a.click();
+ setTimeout(()=>URL.revokeObjectURL(a.href),1000);
+ notice(events.length+' compromisso(s) exportado(s) em .ics para importar na Agenda.');
+}
+$('exportIcsAll')?.addEventListener('click',()=>{
+ const tf=$('eventTypeFilter')?.value||'all',sf=$('eventStatusFilter')?.value||'all',q=$('eventSearch').value.toLocaleLowerCase('pt-BR');
+ const list=db.events.filter(e=>(tf==='all'||e.type===tf)&&(sf==='all'||e.status===sf)&&[e.title,e.type,e.status,agendaProcessLabel(e.caseId)].join(' ').toLocaleLowerCase('pt-BR').includes(q));
+ exportEventsIcs(list);
+});
+
 })();
 </script></body></html>
